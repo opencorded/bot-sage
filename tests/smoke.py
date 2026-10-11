@@ -61,8 +61,20 @@ class Model(BaseHTTPRequestHandler):
             self.wfile.write(b"{}")
             return
         last = [m for m in body["messages"] if m["role"] == "user"][-1]["content"].lower()
-        if "for_bot" not in body["messages"][0]["content"] and "decide whether it asks" not in body["messages"][0]["content"]:
+        first = body["messages"][0]["content"]
+        if "for_bot" not in first and "decide whether it asks" not in first and "make a picture now" not in first:
             asked.append(body)
+        if "does it ask the bot to make a picture now" in first:
+            # The question asked first about a message that sounds like wanting a picture.
+            last = last.split("last message:")[-1]
+            words = json.dumps({"draw": True, "prompt": "!imagine a heron at dawn, soft light --hot", "size": "wide"}
+                               if "draw me" in last else {"draw": False})
+            answer = json.dumps({"choices": [{"message": {"content": words}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(answer)
+            return
         if "decide whether it asks the bot to do one of a few things" in body["messages"][0]["content"]:
             # The question asked first about a message that sounds like a wish.
             if "remember that" in last:
@@ -84,6 +96,8 @@ class Model(BaseHTTPRequestHandler):
             last = last.split("last message:")[-1]
             gates.append(last)
             words = json.dumps({"for_bot": "between us" not in last})
+        elif "type a command" in last:
+            words = json.dumps({"action": "message", "text": "!imagine a heron --human --wide"})
         elif "thanks" in last:
             words = json.dumps({"action": "react", "emoji": "👍", "text": ""})
         elif "explain" in last:
@@ -145,10 +159,10 @@ def main():
                 time.sleep(0.2)
             raise AssertionError(f"did not hear {what}; heard {[(m.sender, m.body[:60]) for m in heard]}")
 
-        def start_bot():
+        def start_bot(painter=""):
             p = subprocess.Popen([sys.executable, "ai_bot.py", address, "--api", f"http://127.0.0.1:{model_port}/v1",
                                   "--username", "sage", "--vault", os.path.join(tmp, "sage"), "--per-minute", "100",
-                                  "--pictures-bot", "", "--pictures", f"http://127.0.0.1:{model_port}"],
+                                  "--pictures-bot", painter, "--pictures", f"http://127.0.0.1:{model_port}"],
                                  cwd=bots, stdout=subprocess.PIPE, text=True)
             started.append(p)
             line = p.stdout.readline()
@@ -251,6 +265,12 @@ def main():
         alice.say("#general", "!ai where")
         wait_for("the list", alice_heard, lambda m: "I take part without a mention in: #general" in m.body)
         # In its channel it reads everything and may stay out of it; called by name it may not.
+        judged = len(gates)
+        alice.say("#general", "bob, between us, a word")   # two people talking: neither is alone with the bot
+        for _ in range(60):
+            if len(gates) > judged:
+                break
+            time.sleep(0.2)
         requests, judged, heard = len(asked), len(gates), len(alice_heard)
         bob.say("#general", "alice, between us, did you see the match")
         for _ in range(60):
@@ -422,6 +442,50 @@ def main():
             time.sleep(0.2)
         assert len(asked[-1]["messages"]) <= 4, [m["content"][:40] for m in asked[-1]["messages"]]
         print("ok  restart: the chat and its chosen channel are remembered; !forget starts fresh")
+
+        # Pictures: it asks the picture bot for the person, under their message, and never types a command.
+        wanted = []
+        painter = Bot(vault=os.path.join(tmp, "painter"), username="painter")
+
+        @painter.offer("picture")
+        def picture(args, asker, via):
+            wanted.append((args, (asker or {}).get("username"), via))
+            return {"posted": True} if "refuse" not in args.get("prompt", "") else {"ok": False, "message": "not here"}
+        painter.connect(address)
+        threading.Thread(target=painter.run, daemon=True).start()
+        sage.terminate()
+        sage.wait(timeout=10)
+        sage = start_bot("painter")
+        time.sleep(3)
+        requests = len(asked)
+        asking = alice.say("#general", "@sage draw me a heron")
+        for _ in range(150):
+            if wanted and len(asked) > requests:
+                break
+            time.sleep(0.2)
+        assert len(wanted) == 1 and wanted[0][1:] == ("alice", "sage"), wanted
+        assert wanted[0][0] == {"prompt": "a heron at dawn, soft light", "size": "wide", "room_id": alice.room_id("#general"),
+                                "event_id": asking["event_id"]}, wanted
+        assert "handed it to @painter" in asked[-1]["messages"][0]["content"], "it was not told what it had done"
+        alice.say("#general", "@sage what do herons eat? a picture book says fish")
+        for _ in range(100):
+            if len(asked) > requests + 1:
+                break
+            time.sleep(0.2)
+        assert len(wanted) == 1, "talk about pictures was taken for wanting one"
+        assert "@painter makes pictures" in asked[-1]["messages"][0]["content"], "it is not told about the picture bot"
+        # What is said to another bot is not for it, even in a channel where it answers everything.
+        requests = len(asked)
+        alice.say("#general", "@painter a heron, please")
+        alice.say("#general", "!imagine a heron")
+        time.sleep(5)
+        assert len(asked) == requests, "it answered something said to another bot"
+        before = len(alice_heard)
+        alice.say("#general", "@sage type a command for me")
+        wait_for("words, not a command", alice_heard[before:] or alice_heard, lambda m: m.body == "a heron")
+        assert not any("!imagine" in m["content"] for m in asked[-1]["messages"][1:]), "a command was kept as talk"
+        print("ok  pictures: asks the picture bot for the person, under their message; stays out of what is said "
+              "to other bots; never types a command")
         print("all AI bot checks passed")
     finally:
         for p in started:

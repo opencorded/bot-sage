@@ -61,7 +61,7 @@ for _kit in (os.environ.get("CORDED_BOT_KIT", ""), _here, os.path.join(_here, "k
     if _kit and os.path.exists(os.path.join(_kit, "corded_bot.py")):
         sys.path.insert(0, os.path.abspath(_kit))
         break
-from corded_bot import Bot  # noqa: E402
+from corded_bot import Bot, mentioned_names  # noqa: E402
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -324,12 +324,11 @@ def paint_itself(description, for_whom=""):
         return "ffmpeg is not installed on my machine, and I need it to make the picture small"
     which = worn()
     wanted = description[:600] + ", portrait, centred, simple background, profile picture"
-    painter = args.pictures_bot if any(m.get("username") == args.pictures_bot for m in bot.members().values()) else ""
-    if painter:
-        got = bot.ask_bot(painter, "picture", {"prompt": wanted, "no": "text, watermark, frame"},
+    if painter():
+        got = bot.ask_bot(painter(), "picture", {"prompt": wanted, "no": "text, watermark, frame"},
                           on_behalf_of=for_whom, timeout=900)
         if not got.get("ok"):
-            return f"{painter} said: {got.get('message') or 'no'}"
+            return f"{painter()} said: {got.get('message') or 'no'}"
         try:
             with open(got["file"], "rb") as f:
                 drawn = f.read()
@@ -414,8 +413,35 @@ def about_itself():
         "read is not sent anywhere else. You cannot browse the web, open links, see pictures or files, set "
         "reminders or remember people between chats.\n"
         f"- You are given the last {args.memory} messages of the chat or thread you are answering in, no more.\n"
-        "- Which model you use is set where you are started, not from the chat.\n\n"
-        + personalities_text())
+        "- Which model you use is chosen on your page in the app (your name in the members list, Manage), by the "
+        "server's owner.\n\n"
+        + others_text() + "\n\n" + personalities_text())
+
+
+def painter():
+    """The picture bot on this server, if there is one: its username, or ""."""
+    return args.pictures_bot if any(m.get("username") == args.pictures_bot for m in bot.members().values()) else ""
+
+
+def others_text():
+    """The other bots here and how the bot stands to them, for the model."""
+    names = sorted(m.get("username", "") for m in bot.members().values() if m.get("bot") and m.get("username"))
+    text = ("# Commands and other bots\n\n"
+            "You never type a command. A line that begins with `!`, or that calls a bot with `@name`, does nothing "
+            "when a bot writes it: bots do not read each other's messages. So never answer with one, never invent "
+            "options like `--something`, and never claim that a command of yours made anything. What people say "
+            "to another bot (a message that begins with `@` and its name, or a `!` command) is not yours to answer.\n")
+    if names:
+        text += f"Other bots here: {', '.join('@' + n for n in names)}.\n"
+    if painter():
+        text += (f"@{painter()} makes pictures from a description. You cannot make pictures yourself, but when "
+                 f"someone asks you for one, a description is written and handed to @{painter()} for them; you are "
+                 "then told so under \"Just now\", and only then is it true. Asked only to write a prompt or a "
+                 "description for a picture, write it out in plain words: what is seen, how it looks, the pose, the "
+                 "place, the light, the style. Words only, no options and no command.")
+    else:
+        text += "There is no picture bot here, and you cannot make pictures yourself."
+    return text
 
 
 def personalities_text():
@@ -642,6 +668,88 @@ def grant(asked, message, said=""):
     return f"They asked for something that was not done, for this reason: {outcome} Tell them so."
 
 
+DRAWS = re.compile(r"\b(draw|paint|sketch|render|generate|imagine|make|create|show|send|pictures?|pics?|images?|"
+                   r"photos?|portrait|art|artwork|wallpaper)\b", re.IGNORECASE)
+
+
+def picture_wanted(message, lines):
+    """Whether the message asks the bot for a picture, and if so the
+    description to hand to the picture bot: {"prompt", "size"} or None.
+    A question of its own, like the others: asked to answer and to act at
+    once, the model only says that it acted."""
+    system = (
+        "You read the end of a chat and decide one thing about the LAST message, which was said to a chat bot: "
+        "does it ask the bot to make a picture now? Answer with one JSON object and nothing else.\n\n"
+        '{"draw": false}: anything else. Ordinary talk, talk about pictures, a question, and asking only for a '
+        "prompt or a description to be written (\"write me a prompt for ...\", \"paste just the prompt\"): that "
+        "is asking for words, not for a picture. Also false when it asks for the bot's own profile picture.\n"
+        '{"draw": true, "prompt": "<the description>", "size": "square" | "wide" | "tall"}: it asks for a picture '
+        "to be made, drawn, generated or shown (\"draw ...\", \"make a picture of ...\", \"generate that\", "
+        "\"write a good prompt and generate it\"). For prompt, write the description an image model works best "
+        "from: the subject first, then how it looks, the pose, the place, the light and the style, as plain "
+        "phrases with commas between, in English, forty words at most. Keep to what was asked, as plainly and as "
+        "explicitly as it was asked, and leave nothing of it out. When the message points at something said "
+        "earlier (\"that\", \"it\", \"the prompt\"), use that. No options, no commands. size: tall for one "
+        "person standing or a portrait, wide for a landscape or a scene, else square.")
+    talk = "\n".join(f"{args.username if line['mine'] else line['who']}: {line['text']}" for line in lines[-8:-1] if line["text"])
+    request = urllib.request.Request(
+        args.api.rstrip("/") + "/chat/completions",
+        data=json.dumps({"model": model_now(), "stream": False, "max_tokens": 200, "temperature": 0.2,
+                         "response_format": {"type": "json_object"},
+                         "messages": [{"role": "system", "content": system},
+                                      {"role": "user", "content": (f"Earlier:\n{talk}\n\n" if talk else "") +
+                                       f"LAST message:\n{message.sender_name}: {message.body}"}]}).encode(),
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=120) as answer:
+            said = json.load(answer)["choices"][0]["message"]["content"]
+        found = json.loads(said[said.find("{"):said.rfind("}") + 1])
+    except Exception:  # noqa: BLE001
+        return None
+    prompt = str(found.get("prompt") or "").strip() if isinstance(found, dict) and found.get("draw") is True else ""
+    prompt = re.sub(r"\s--+\w*", " ", re.sub(r"^\s*[!/]\w+\s*", "", prompt)).strip()
+    if not prompt:
+        return None
+    return {"prompt": prompt[:600], "size": found.get("size") if found.get("size") in ("wide", "tall") else "square"}
+
+
+def draw(message, lines):
+    """Asked for a picture: the picture bot is asked for it, for the person
+    who wanted it and under their message, so that bot's own rules decide.
+    Returns what the model is to be told about it, or "" if none was asked."""
+    if not DRAWS.search(message.body):
+        return ""
+    wanted = picture_wanted(message, lines)
+    if not wanted:
+        return ""
+    if not painter():
+        return ("They asked you for a picture. None was made: you cannot make pictures yourself and there is no "
+                "picture bot on this server. Tell them so, briefly.")
+    asked = dict(wanted)
+    if not message.direct:   # in a chat the picture bot is in too: it posts the picture there itself
+        asked.update(room_id=message.room_id, event_id=message.event_id)
+    got = bot.ask_bot(painter(), "picture", asked, on_behalf_of=message.sender_id, timeout=900 if message.direct else 60)
+    if got.get("ok") and got.get("file"):
+        try:
+            bot.send_file(message.room_id, got["file"], f"**{wanted['prompt']}**", reply_to=message.event_id)
+        finally:
+            if os.path.exists(got["file"]):
+                os.remove(got["file"])
+    if not got.get("ok"):
+        note(f"{message.sender}: no picture: {got.get('message')}")
+        return (f"They asked you for a picture. You asked @{painter()}, the picture bot, for it, and it was not "
+                f"made. What it said: \"{got.get('message') or 'no'}\" Tell them that, briefly, in your own voice.")
+    note(f"{message.sender}: asked {painter()} for: {wanted['prompt'][:80]}")
+    if message.direct:
+        return (f"They asked you for a picture. You had @{painter()} make it from this description: "
+                f"\"{wanted['prompt']}\", and it is in the chat now, above. Say a few words about it in your own "
+                "voice. Do not repeat the description and do not type any command.")
+    return (f"They asked you for a picture. You wrote this description for it: \"{wanted['prompt']}\" and handed "
+            f"it to @{painter()}, the picture bot, which is making it now and will post it under their message "
+            "within a minute. Say so in a few words, in your own voice. Do not repeat the description and do not "
+            "type any command.")
+
+
 def meant_for_me(message, lines):
     """Asked before the bot answers something nobody called it for: is this
     message for it at all? A question of its own, with nothing else to think
@@ -707,6 +815,9 @@ def understand(words, direct):
         action = "message" if direct else "reply"
     if action != "react" and not text:
         action, emoji = "react", emoji or "👍"
+    # Words only: a model that has seen commands in a chat likes to type one, and it would do nothing.
+    if text.startswith(bot.prefix) or re.match(r"@\w+\s", text):
+        text = re.sub(r"\s--+\w+", "", re.sub(r"^\s*([!/@]\w+\s*)+", "", text)).strip() or "👍"
     to = decided.get("to")
     return {"action": action, "to": to if isinstance(to, int) else None, "text": text, "emoji": emoji[:8]}
 
@@ -764,6 +875,7 @@ def answer(message, optional=False):
         earlier = lines[-2] if len(lines) > 1 and not lines[-2]["mine"] and lines[-2]["who"] == message.sender_name else None
         before = earlier["text"] if earlier else ""
         done = grant(wish(message, before), message, (before + "\n" if before else "") + message.body)
+        done = done or draw(message, lines)
         try:
             words = ask_model(message, lines, done)
         except urllib.error.HTTPError:
@@ -929,9 +1041,14 @@ def hear(message):
     if message.type != "m.text" or not message.body.strip():
         return
     before = list(history(message.room_id, message.thread))
-    remember(message.room_id, message.thread, entry(message.event_id, message.sender_name, message.body))
     if message.body.strip().startswith(bot.prefix):
-        return   # a command, for this bot or another
+        return   # a command, for this bot or another: not talk, and not kept as talk
+    remember(message.room_id, message.thread, entry(message.event_id, message.sender_name, message.body))
+    if not message.mentions_me and not message.direct:
+        # Calling someone else by name, another bot above all, is not talking to this one.
+        called = mentioned_names(message.body)
+        if called & {m.get("username", "").lower() for m in bot.members().values()}:
+            return
     chosen = message.room_id in bot.store.get("channels", [])
     following = bool(message.thread) and message.thread in spoken_threads()
     # Answering the bot is talking to it: a reply to one of its messages, or

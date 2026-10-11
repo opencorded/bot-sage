@@ -134,6 +134,16 @@ machine that reaches the server; it does not have to be the server's.
 To keep it running, and to see it on a page with everything else, list it in
 the [host](https://github.com/opencorded/host).
 
+## Pictures
+
+Sage makes no pictures itself. Asked for one ("draw me ...", "write a good
+prompt and generate it"), it writes the description and hands it to the
+[picture bot](https://github.com/opencorded/bot-pictures) on the same server
+(`--pictures-bot NAME`, `pictures` unless said otherwise), for the person who
+asked: that bot's own rules decide, and it posts the picture under their
+message. Asked only for a prompt, Sage writes one out in words. It never types
+commands, and stays out of what is said to another bot by name.
+
 ## Turning it off and on
 
 `!NAME off` and `!NAME on`, where NAME is the bot's username, from the server's
