@@ -94,6 +94,31 @@ bot = Bot(vault=args.vault or f"./{args.username}-vault", username=args.username
           picture=args.picture or None,
           about=f"A language model running on this server's own machine; nothing I read leaves it. Mention me "
                 f"(@{args.username}) or write to me directly. I keep it short. !forget makes me start fresh.")
+bot.version = "1.1"
+
+
+def keep_setting(key, value):
+    bot.store[key] = value
+    bot.store.save()
+
+
+# The bot's page in the app (tap it in the members list, Manage): the same
+# things as the !ai and !persona commands, as controls.
+bot.setting("channels", "channels", "Channels I take part in",
+            help="There I read everything and join in when it is meant for me. Mentions and direct chats always.",
+            get=lambda: list(bot.store.get("channels", [])), set=lambda v: keep_setting("channels", v))
+bot.setting("always", "channels", "Channels where I answer every message",
+            help="For a channel that is only for talking to me.",
+            get=lambda: list(bot.store.get("always", [])), set=lambda v: keep_setting("always", v))
+bot.setting("personalities", "switch", "Personalities",
+            help="On: I can be told to switch, take on new characters, change and remember. Off: one plain character.",
+            get=lambda: not bot.store.get("personas_off"), set=lambda v: keep_setting("personas_off", not v))
+bot.setting("everyone_reshapes", "switch", "Anyone may switch and change my personalities",
+            help="Off: only the owner and those who manage bots.",
+            get=lambda: bool(bot.store.get("personas_open")), set=lambda v: keep_setting("personas_open", bool(v)))
+bot.info("model", "Model", get=lambda: args.model)
+bot.info("speed", "Last answer took", get=lambda: f"{last_answer['seconds']:.1f} s" if last_answer["seconds"] is not None else "nothing yet")
+
 ACTIONS = ("message", "reply", "thread", "react")
 recent = {}        # (room id, thread root or "") -> the last few messages there, oldest first
 talking_to = {}    # (room id, thread root or "") -> (the person last answered there, when)
