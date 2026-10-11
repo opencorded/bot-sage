@@ -709,7 +709,9 @@ def decide(message, lines):
               "remember": r"remember|forget|keep in mind|note|memor"}
     if do in worded and not re.search(rf"\b({worded[do]})", said, re.IGNORECASE) and not talk:
         found, do = {"do": "none"}, "none"
-    renaming = not plain and bool(RENAMES.search(said))
+    renaming = not plain and bool(RENAMES.search(said) or (
+        re.search(r"\b(yo)?ur name\b", said, re.IGNORECASE)
+        and not re.search(r"^\s*(what|whats|what's|who|why|how|is|do|does|i (like|love))\b|\?\s*$", said, re.IGNORECASE)))
     if renaming and (do in ("create", "switch") or (do == "change" and not APPEARANCE.search(said))):
         found, do = {"do": "none"}, "none"   # "change your name" is neither a new personality nor a new manner
     if not plain and do in (None, "none") and not said.rstrip().endswith("?") or (
@@ -725,7 +727,9 @@ def decide(message, lines):
             found, do = {"do": "change", "text": "", "looks": said}, "change"
     if not plain and do in (None, "none") and re.search(
             r"\bselfie\b|what (do|does|would) (yo)?u look like|show (me )?(yo)?ur(self| face)|(pic|picture|photo) of (yo)?u(rself)?\b|"
-            r"\b(let me|lemme|can i|i wanna|i want to|let's) see (yo)?u\b|\bshow me (what )?(yo)?u\b(?! how| the| a | that| what| can| know| did| are)|"
+            r"\b(let me|lemme|can i|i wanna|wanna|i want to|let's) see (yo)?u(r|rself)?\b|"
+            r"\bshow me (what )?(yo)?u(r|rself)?\b(?! how| the| a | that| what| can| know| did| are| code| work)|"
+            r"\bshow (yo)?ur(self)?\b|"
             r"\bsee what (yo)?u look like|\bhow do (yo)?u look\b",
             said, re.IGNORECASE):
         found, do = {"do": "look"}, "look"
