@@ -97,12 +97,45 @@ bot = Bot(vault=args.vault or f"./{args.username}-vault", username=args.username
           picture=args.picture or None,
           about=f"A language model running on this server's own machine; nothing I read leaves it. Mention me "
                 f"(@{args.username}) or write to me directly. I keep it short. !forget makes me start fresh.")
-bot.version = "1.1"
+bot.version = "1.2"
 
 
 def keep_setting(key, value):
     bot.store[key] = value
     bot.store.save()
+
+
+def model_now():
+    """The model it thinks with: the one chosen on its page, or else the one it was started with."""
+    return bot.store.get("model") or args.model
+
+
+def models_here():
+    """The models the model program on this machine has, for choosing among (Ollama's own list)."""
+    base = args.api.rstrip("/")
+    base = base[:-3] if base.endswith("/v1") else base
+    try:
+        with urllib.request.urlopen(base + "/api/tags", timeout=5) as answer:
+            names = sorted(m.get("name", "") for m in json.load(answer).get("models", []))
+    except Exception:  # noqa: BLE001  (not Ollama, or not running: only the current one is known)
+        names = []
+    return names if model_now() in names else [model_now()] + names
+
+
+def choose_model(name):
+    before = model_now()
+    keep_setting("model", name)
+    if name != before:
+        # The one it had is set down, so both are not held at once.
+        try:
+            base = args.api.rstrip("/")
+            base = base[:-3] if base.endswith("/v1") else base
+            request = urllib.request.Request(base + "/api/generate", data=json.dumps({"model": before, "keep_alive": 0}).encode(),
+                                             headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(request, timeout=30).read()
+        except Exception:  # noqa: BLE001
+            pass
+        note(f"now thinking with {name}")
 
 
 # The bot's page in the app (tap it in the members list, Manage): the same
@@ -119,7 +152,9 @@ bot.setting("personalities", "switch", "Personalities",
 bot.setting("everyone_reshapes", "switch", "Anyone may switch and change my personalities",
             help="Off: only the owner and those who manage bots.",
             get=lambda: bool(bot.store.get("personas_open")), set=lambda v: keep_setting("personas_open", bool(v)))
-bot.info("model", "Model", get=lambda: args.model)
+bot.setting("model", "choice", "Model", options=models_here, get=model_now, set=choose_model, needs="owner",
+            help="Which of the models on my machine I think with. They differ in how well they follow my "
+                 "instructions and in what they will and will not say. Only the owner changes this.")
 bot.info("speed", "Last answer took", get=lambda: f"{last_answer['seconds']:.1f} s" if last_answer["seconds"] is not None else "nothing yet")
 bot.show_status()
 
@@ -375,7 +410,7 @@ def about_itself():
         "- `!help`: lists these commands.\n"
         f"- `!{args.username} off` turns you off: you show as offline, answer nothing and unload from the "
         f"graphics card, until `!{args.username} on`. Owner or Manage bots only.\n"
-        f"- You are the language model {args.model}, running on the same machine as this chat server. What you "
+        f"- You are the language model {model_now()}, running on the same machine as this chat server. What you "
         "read is not sent anywhere else. You cannot browse the web, open links, see pictures or files, set "
         "reminders or remember people between chats.\n"
         f"- You are given the last {args.memory} messages of the chat or thread you are answering in, no more.\n"
@@ -422,17 +457,19 @@ def ready_the_card():
         with urllib.request.urlopen(request, timeout=15) as answer:
             return json.load(answer)
     try:
-        if args.pictures:
-            state = get(args.pictures.rstrip("/") + "/")
+        # Named with --pictures, or else looked for at its usual place on this machine.
+        neighbour = (args.pictures or "http://127.0.0.1:7860").rstrip("/")
+        state = get(neighbour + "/")
+        if "loaded" in state and "busy" in state:   # image_server.py, and not something else on that port
             if state.get("loaded") and not state.get("busy"):
-                get(args.pictures.rstrip("/") + "/unload", {})
+                get(neighbour + "/unload", {})
                 note("asked the picture program to let go of the graphics card")
     except Exception:  # noqa: BLE001  (no picture program here)
         pass
     try:
         for held in get(base + "/api/ps").get("models", []):
-            if held.get("name") == args.model and held.get("size") and held.get("size_vram", 0) < held["size"] * 0.9:
-                get(base + "/api/generate", {"model": args.model, "keep_alive": 0})
+            if held.get("name") == model_now() and held.get("size") and held.get("size_vram", 0) < held["size"] * 0.9:
+                get(base + "/api/generate", {"model": model_now(), "keep_alive": 0})
                 note("the model was mostly off the graphics card; set it down to load again")
                 time.sleep(1)
     except Exception:  # noqa: BLE001  (not Ollama)
@@ -466,7 +503,7 @@ def ask_model(message, lines, done=""):
             messages.append({"role": "user", "content": f"[{index}] {line['who']}: {line['text']}"})
     request = urllib.request.Request(
         args.api.rstrip("/") + "/chat/completions",
-        data=json.dumps({"model": args.model, "messages": messages, "stream": False, "max_tokens": args.max_tokens,
+        data=json.dumps({"model": model_now(), "messages": messages, "stream": False, "max_tokens": args.max_tokens,
                          "response_format": {"type": "json_object"}}).encode(),
         headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=300) as answer:
@@ -520,7 +557,7 @@ def wish(message, before=""):
         f"is right now, which is: {now_is}")
     request = urllib.request.Request(
         args.api.rstrip("/") + "/chat/completions",
-        data=json.dumps({"model": args.model, "stream": False, "max_tokens": 200, "temperature": 0,
+        data=json.dumps({"model": model_now(), "stream": False, "max_tokens": 200, "temperature": 0,
                          "response_format": {"type": "json_object"},
                          "messages": [{"role": "system", "content": system},
                                       {"role": "user", "content": (f"{message.sender_name}: {before}\n" if before else "")
@@ -547,7 +584,7 @@ def invent(wanted, said):
               'how they talk>"}. If it is a known character from a film, book, show or game, be true to it.')
     request = urllib.request.Request(
         args.api.rstrip("/") + "/chat/completions",
-        data=json.dumps({"model": args.model, "stream": False, "max_tokens": 300, "temperature": 0.3,
+        data=json.dumps({"model": model_now(), "stream": False, "max_tokens": 300, "temperature": 0.3,
                          "response_format": {"type": "json_object"},
                          "messages": [{"role": "system", "content": system},
                                       {"role": "user", "content": f"They said: {said}\nThe character: {wanted}"}]}).encode(),
@@ -630,7 +667,7 @@ def meant_for_me(message, lines):
     last = shown[-1]
     request = urllib.request.Request(
         args.api.rstrip("/") + "/chat/completions",
-        data=json.dumps({"model": args.model, "stream": False, "max_tokens": 20, "temperature": 0,
+        data=json.dumps({"model": model_now(), "stream": False, "max_tokens": 20, "temperature": 0,
                          "response_format": {"type": "json_object"},
                          "messages": [{"role": "system", "content": system},
                                       {"role": "user", "content": (f"Earlier:\n{talk}\n\n" if talk else "") +
@@ -932,10 +969,10 @@ def switched(on):
     base = base[:-3] if base.endswith("/v1") else base
     try:   # Ollama's own way of saying "unload now"; other model servers ignore or refuse it
         request = urllib.request.Request(base + "/api/generate",
-                                         data=json.dumps({"model": args.model, "keep_alive": 0}).encode(),
+                                         data=json.dumps({"model": model_now(), "keep_alive": 0}).encode(),
                                          headers={"Content-Type": "application/json"})
         urllib.request.urlopen(request, timeout=30).read()
-        note(f"turned off; asked the model server to unload {args.model}")
+        note(f"turned off; asked the model server to unload {model_now()}")
     except Exception:  # noqa: BLE001
         note("turned off")
 
@@ -991,7 +1028,7 @@ def forget(message, words):
 @bot.command("model", help="what I think with, and how long my last answer took")
 def model(message, words):
     took = last_answer["seconds"]
-    return f"I think with {args.model}." + (f" My last answer took {took:.1f} seconds." if took is not None else "")
+    return f"I think with {model_now()}." + (f" My last answer took {took:.1f} seconds." if took is not None else "")
 
 
 if __name__ == "__main__":
@@ -1000,5 +1037,5 @@ if __name__ == "__main__":
         note(f"WARNING: --api points at {host}, not at this machine. Every message this bot reads will be sent there.")
     bot.connect(args.address)
     wear(worn(), quietly=True)
-    note(f"{args.username} is connected, thinking with {args.model} at {args.api}")
+    note(f"{args.username} is connected, thinking with {model_now()} at {args.api}")
     bot.run()

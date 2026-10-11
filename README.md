@@ -28,6 +28,11 @@ python3 ai_bot.py 127.0.0.1:7443 --soul soul.example.txt --username sage
 server, LM Studio) works with `--api`. The [host](https://github.com/opencorded/host) can start Ollama
 and the bot together.
 
+**Choosing the model from the app.** On Sage's page (members list, tap it,
+Manage) the owner picks among the models Ollama has on that machine; the
+change takes effect with the next answer. To have another model to pick,
+fetch it on the machine: `ollama pull NAME`.
+
 **What it will and will not say** is decided by two things: the soul file,
 which is yours to write, and the model, which was trained with habits of its
 own that no file fully overrides. `--model` takes any model your Ollama has;

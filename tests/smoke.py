@@ -104,6 +104,14 @@ class Model(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(answer)
 
+    def do_GET(self):
+        # Ollama's list of the models it has; anything else asked of this port is not there.
+        body = json.dumps({"models": [{"name": "qwen2.5:7b"}, {"name": "other:1b"}]} if self.path == "/api/tags" else {}).encode()
+        self.send_response(200 if self.path == "/api/tags" else 404)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, *_):
         pass
 
@@ -336,6 +344,34 @@ def main():
         time.sleep(3)
         assert "tea without milk" in system() and "end every answer with arr" not in system(), "back as the first, with its memories and without the other's changes"
         print("ok  personalities: remembers when told; made, switched and changed by talking or by command; each has its own memories; only a manager reshapes")
+
+        # Its page: the model is a choice among those the machine has, and only the owner's to make.
+        got = []
+        alice.on_event("m.bot.")(got.append)
+        bob.on_event("m.bot.")(got.append)
+
+        def page(person, kind, **content):
+            del got[:]
+            room = person.dm("sage")
+            person.request({"cmd": "send_event", "room_id": room, "type": kind, "content": content, "expires_in": 3600})
+            end = time.time() + 20
+            while time.time() < end:
+                pages = [g["content"] for g in got if g["type"] == "m.bot.description" and g["room_id"] == room]
+                if pages:
+                    return {c["key"]: c for c in pages[-1]["controls"]}
+                time.sleep(0.2)
+            raise AssertionError("the bot did not describe itself")
+        controls = page(alice, "m.bot.describe")
+        assert controls["model"]["value"] == "qwen2.5:7b" and controls["model"]["options"] == ["other:1b", "qwen2.5:7b"]
+        assert controls["model"]["can_change"] and not page(bob, "m.bot.describe")["model"]["can_change"]
+        assert page(bob, "m.bot.set", key="model", value="other:1b")["model"]["value"] == "qwen2.5:7b", "not the owner"
+        assert page(alice, "m.bot.set", key="model", value="other:1b")["model"]["value"] == "other:1b"
+        alice.say("#general", "@sage which model now")
+        time.sleep(3)
+        assert asked[-1]["model"] == "other:1b", asked[-1]["model"]
+        assert page(alice, "m.bot.set", key="model", value="not-installed")["model"]["value"] == "other:1b"
+        page(alice, "m.bot.set", key="model", value="qwen2.5:7b")
+        print("ok  its page: the model is chosen among those on the machine, by the owner only, and used from the next answer")
 
         # Off and on, by those who manage bots; off, it answers nothing.
         bob.say("#general", "!sage off")
