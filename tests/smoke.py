@@ -107,6 +107,8 @@ class Model(BaseHTTPRequestHandler):
             words = json.dumps({"action": "reply", "to": 1, "text": "The first."})
         elif "long" in last:
             words = json.dumps({"action": "message", "text": "\n\n".join(["A paragraph of words. " * 60] * 6)})
+        elif "ramble" in last:
+            words = json.dumps({"action": "message", "text": "One sentence of it. " * 40})
         elif "cut short" in last:
             words = '{"action": "message", "text": "It began well, and then \\"it'
         elif "empty" in last:
@@ -296,6 +298,10 @@ def main():
         alice.say("#general", "say it plain")
         plain = wait_for("plain words", alice_heard, lambda m: m.body.startswith("Just words"))
         assert "@everyone" not in plain.body and plain.reply_to
+        alice.say("#general", "@sage do not ramble")
+        short = wait_for("a texting answer", alice_heard, lambda m: m.body.startswith("One sentence of it."))
+        assert len(short.body) <= 320 and short.body.endswith("."), len(short.body)
+        assert "This is texting" in asked[-1]["messages"][0]["content"] and asked[-1]["max_tokens"] <= 140
         alice.say("#general", "@sage one that is cut short")
         wait_for("the words out of an unfinished form", alice_heard, lambda m: m.body == 'It began well, and then "it')
         # A model that returns the form with nothing in it is not quoted: a nod instead.

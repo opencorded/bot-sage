@@ -553,6 +553,24 @@ def ready_the_card():
         pass
 
 
+LONG = re.compile(r"\b(story|stories|long|longer|detail\w*|explain|describe|description|write|essay|paragraphs?|list|"
+                  r"steps|tell me (all|everything|more)|in depth|elaborate|poem|song|summar\w+|how (do|does|to)|why)\b",
+                  re.IGNORECASE)
+
+
+def wants_length(text):
+    """Whether what was said asks for more than a text message's worth."""
+    return bool(LONG.search(text))
+
+
+def brief(text, limit=320):
+    """A texting answer that ran on, cut back to whole sentences."""
+    if len(text) <= limit:
+        return text
+    cut = max(text.rfind(mark, 0, limit) for mark in (". ", "! ", "? ", ".\n", "!\n", "?\n", "…"))
+    return text[:cut + 1].rstrip() if cut > 40 else text[:limit].rsplit(" ", 1)[0] + "…"
+
+
 def ask_model(message, lines, done=""):
     room = bot.rooms.get(message.room_id, {})
     if message.direct:
@@ -571,6 +589,11 @@ def ask_model(message, lines, done=""):
         '{"action": "message" | "reply" | "thread" | "react", "to": <number of the message it attaches to>, '
         '"text": "<your words, empty for react>", "emoji": "<one emoji, only for react>"}\n'
         f'"to" may be left out; it then means message [{number}].')
+    long_one = wants_length(message.body)
+    situation += ("\n\nThey asked for something long: write it out in full." if long_one else
+                  "\n\nThis is texting. Answer the way people text: one or two short sentences, thirty words at "
+                  "most, no speeches, no lists, no narration of what you are doing. Only when someone asks for "
+                  "something long (a story, an explanation, details) do you write more.")
     if done:
         situation += "\n\n# Just now\n\n" + done
     # What it can say about itself comes first, as something to look things up in; who it is
@@ -584,7 +607,8 @@ def ask_model(message, lines, done=""):
             messages.append({"role": "user", "content": f"[{index}] {line['who']}: {line['text']}"})
     request = urllib.request.Request(
         args.api.rstrip("/") + "/chat/completions",
-        data=json.dumps({"model": model_now(), "messages": messages, "stream": False, "max_tokens": args.max_tokens,
+        data=json.dumps({"model": model_now(), "messages": messages, "stream": False,
+                         "max_tokens": args.max_tokens if long_one else min(args.max_tokens, 140),
                          "response_format": {"type": "json_object"}}).encode(),
         headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=300) as answer:
@@ -1159,6 +1183,8 @@ def answer(message, optional=False):
         thinking.set()
     last_answer["seconds"] = time.time() - began
     decided = understand(words, message.direct)
+    if not wants_length(message.body):
+        decided["text"] = brief(decided["text"])
     target = message.event_id
     if decided["to"] and 1 <= decided["to"] <= len(lines) and lines[decided["to"] - 1]["id"]:
         target = lines[decided["to"] - 1]["id"]
