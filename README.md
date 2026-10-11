@@ -158,8 +158,8 @@ Sage makes no pictures itself. Asked for one ("draw me ...", "write a good
 prompt and generate it"), it writes the description and hands it to the
 [picture bot](https://github.com/opencorded/bot-pictures) on the same server
 (`--pictures-bot NAME`, `pictures` unless said otherwise), for the person who
-asked: that bot's own rules decide, and it posts the picture under their
-message. Asked only for a prompt, Sage writes one out in words. It never types
+asked: that bot's own rules decide, and Sage posts the picture itself, as a
+reply, with a line of its own. Nothing of the picture is kept on disk. Asked only for a prompt, Sage writes one out in words. It never types
 commands, and stays out of what is said to another bot by name.
 
 ## Turning it off and on

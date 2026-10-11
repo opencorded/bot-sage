@@ -397,7 +397,7 @@ def paint_itself(description, for_whom="", which=None):
         f.write(small)
     if which == worn():
         wear(which, quietly=True)
-    note(f"a new picture for {which}: {description[:80]}")
+    note(f"a new picture for {which}")
     return ""
 
 
@@ -921,33 +921,28 @@ def hand_to_painter(message, wanted, what):
     asked = {"prompt": wanted["prompt"], "size": wanted.get("size", "square")}
     if picture_model_now():
         asked["model"] = picture_model_now()
-    if not message.direct:   # in a chat the picture bot is in too: it posts the picture there itself
-        asked.update(room_id=message.room_id, event_id=message.event_id)
-    got = bot.ask_bot(painter(), "picture", asked, on_behalf_of=message.sender_id, timeout=900 if message.direct else 60)
-    if got.get("ok") and got.get("file"):
-        try:
-            bot.send_file(message.room_id, got["file"], f"**{wanted['prompt']}**", reply_to=message.event_id)
-        finally:
-            if os.path.exists(got["file"]):
-                os.remove(got["file"])
-    if not got.get("ok"):
+    if not message.direct:
+        # In a chat the picture bot is in too: made by that chat's rules, with the picture bot's marks
+        # under the person's message, and handed back for this bot to post as its own.
+        asked.update(room_id=message.room_id, event_id=message.event_id, return_file=True)
+    got = bot.ask_bot(painter(), "picture", asked, on_behalf_of=message.sender_id, timeout=960)
+    if not got.get("ok") or not got.get("file"):
         note(f"{message.sender}: no picture: {got.get('message')}")
+        if "called off" in str(got.get("message")):
+            return None
         return (f"They asked you for {what}. You asked @{painter()}, the picture bot, for it, and it was not "
                 f"made. What it said: \"{got.get('message') or 'no'}\" Tell them that, briefly, in your own voice.")
-    note(f"{message.sender}: asked {painter()} for: {wanted['prompt'][:80]}")
-    if not message.direct:
-        # The picture bot is drawing now and holds the graphics card: thinking up a line
-        # about it would only fight it for the card. A nod, and the picture speaks.
-        bot.attempt(bot.react, message, "🎨")
-        return None
-    if message.direct:
-        return (f"They asked you for {what}. You had @{painter()} make it from this description: "
-                f"\"{wanted['prompt']}\", and it is in the chat now, above. Say a few words about it in your own "
-                "voice. Do not repeat the description and do not type any command.")
-    return (f"They asked you for {what}. You wrote this description for it: \"{wanted['prompt']}\" and handed "
-            f"it to @{painter()}, the picture bot, which is making it now and will post it under their message "
-            "within a minute. Say so in a few words, in your own voice. Do not repeat the description and do not "
-            "type any command.")
+    try:
+        sent = bot.send_file(message.room_id, got["file"], "", reply_to=message.event_id, thread=message.thread)
+        remember(message.room_id, message.thread, entry((sent or {}).get("event_id", ""), args.username,
+                                                        f"(a picture you sent: {wanted['prompt'][:200]})", mine=True))
+    finally:
+        if os.path.exists(got["file"]):
+            os.remove(got["file"])   # nothing of a picture is kept here
+    note(f"{message.sender}: sent a picture made by {painter()}")
+    return (f"They asked you for {what}, and you have just sent it: it is in the chat, above, as your own picture. "
+            f"It shows: \"{wanted['prompt'][:300]}\" Add one short line to go with it, in your own voice, as if you "
+            "had just sent a photo. Do not describe the picture again and do not type any command.")
 
 
 def grant(asked, message):
@@ -968,7 +963,7 @@ def grant(asked, message):
         if not text:
             return ""
         keep(text, message.sender_name)
-        note(f"{message.sender}: remembered: {text[:80]}")
+        note(f"{message.sender}: remembered something")
         return f"You were asked to remember something and have now stored it for good: \"{text}\". Say so, briefly."
     if do == "list":
         now = worn()
@@ -1270,7 +1265,7 @@ def reshape(change, message):
         # A change to how it looks goes into its looks, and from there into its next pictures.
         looks = relook(worn(), message.body)
         if looks:
-            note(f"{message.sender}: {worn()} looks different now: {looks[:80]}")
+            note(f"{message.sender}: {worn()} looks different now")
             bot.work(first_picture, worn(), message.sender_id)   # after the answer: the face to match
             return True, f"(That is what I look like now: {looks} A profile picture to match is being made.)"
     if do == "change" and character:
@@ -1279,7 +1274,7 @@ def reshape(change, message):
         if "## Since then" not in soul:
             soul += "\n\n## Since then\n\nWhat you have been asked to be, newest last. These outweigh what is above."
         write_file(path, soul + f"\n- {character[:400]} ({message.sender_name}, {time.strftime('%Y-%m-%d')})")
-        note(f"{message.sender}: changed {worn()}: {character[:80]}")
+        note(f"{message.sender}: changed {worn()}")
         return True, "(Noted in my character.)"
     return False, ""
 

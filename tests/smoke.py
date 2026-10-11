@@ -460,12 +460,12 @@ def main():
         @painter.offer("picture")
         def picture(args, asker, via):
             wanted.append((args, (asker or {}).get("username"), via))
-            if "room_id" not in args:   # a profile picture: the file goes back
-                path = os.path.join(tmp, "face.png")
-                with open(path, "wb") as f:
-                    f.write(base64.b64decode(PNG))
-                return {"file": path}
-            return {"posted": True} if "refuse" not in args.get("prompt", "") else {"ok": False, "message": "not here"}
+            if "refuse" in args.get("prompt", ""):
+                return {"ok": False, "message": "not here"}
+            path = os.path.join(tmp, "face.png")   # the file goes back, for the asking bot to post or wear
+            with open(path, "wb") as f:
+                f.write(base64.b64decode(PNG))
+            return {"file": path}
         painter.connect(address)
         threading.Thread(target=painter.run, daemon=True).start()
         sage.terminate()
@@ -474,18 +474,22 @@ def main():
         time.sleep(3)
         requests = len(asked)
         asking = alice.say("#general", "@sage draw me a heron")
+        files = []
+        alice.on_file(files.append)
         for _ in range(150):
-            if wanted:
+            if wanted and len(asked) > requests:
                 break
             time.sleep(0.2)
-        time.sleep(2)
-        assert len(asked) == requests, "with the picture bot drawing, it still asked the model for words"
+        time.sleep(1)
+        assert files and files[-1].sender == "sage" and files[-1].reply_to == asking["event_id"], "it did not post the picture itself"
+        assert "you have just sent it" in asked[-1]["messages"][0]["content"], "it was not told that it had sent a picture"
+        assert not os.listdir(os.path.join(tmp, "sage", "received")), "the picture was kept on disk after sending"
         assert len(wanted) == 1 and wanted[0][1:] == ("alice", "sage"), wanted
         assert wanted[0][0] == {"prompt": "a heron at dawn, soft light", "size": "wide", "room_id": alice.room_id("#general"),
-                                "event_id": asking["event_id"]}, wanted
+                                "event_id": asking["event_id"], "return_file": True}, wanted
         alice.say("#general", "@sage what do herons eat? a picture book says fish")
         for _ in range(100):
-            if len(asked) > requests:
+            if len(asked) > requests + 1:
                 break
             time.sleep(0.2)
         assert len(wanted) == 1, "talk about pictures was taken for wanting one"
