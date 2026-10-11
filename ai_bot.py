@@ -524,7 +524,9 @@ def ask_model(message, lines, done=""):
         f'"to" may be left out; it then means message [{number}].')
     if done:
         situation += "\n\n# Just now\n\n" + done
-    messages = [{"role": "system", "content": standing_text() + "\n\n" + about_itself() + "\n\n" + situation}]
+    # What it can say about itself comes first, as something to look things up in; who it is
+    # comes after, nearer the question, where a small model still holds on to it.
+    messages = [{"role": "system", "content": about_itself() + "\n\n# Who you are\n\n" + standing_text() + "\n\n" + situation}]
     for index, line in enumerate(lines, 1):
         if line["mine"]:
             messages.append({"role": "assistant",
