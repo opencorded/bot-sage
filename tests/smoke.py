@@ -485,6 +485,12 @@ def main():
         alice.say("#general", "@sage type a command for me")
         wait_for("words, not a command", alice_heard[before:] or alice_heard, lambda m: m.body == "a heron")
         assert not any("!imagine" in m["content"] for m in asked[-1]["messages"][1:]), "a command was kept as talk"
+        before = len(alice_heard)
+        alice.say("#general", "!raw say it plain")
+        wait_for("the model's own words", alice_heard, lambda m: m.body.startswith("`") and m.body.endswith("Just words, no form. @ everyone"))
+        assert len(asked[-1]["messages"]) == 1 and "response_format" not in asked[-1], "the model was not asked the words alone"
+        bob.say("#general", "!raw say it plain")
+        wait_for("a refusal", bob_heard, lambda m: "can ask the model directly" in m.body)
         print("ok  pictures: asks the picture bot for the person, under their message; stays out of what is said "
               "to other bots; never types a command")
         print("all AI bot checks passed")

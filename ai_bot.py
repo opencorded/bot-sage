@@ -408,6 +408,8 @@ def about_itself():
         "- `!ai where`: lists the channels chosen for you.\n"
         "- `!forget`: you forget the chat or thread it is typed in and start fresh.\n"
         "- `!model`: says which model you run on and how long your last answer took.\n"
+        "- `!raw some words`: the model is asked those words alone, with none of your character or instructions, and "
+        "its answer is posted as it comes. Owner or Manage bots only.\n"
         "- `!help`: lists these commands.\n"
         f"- `!{args.username} off` turns you off: you show as offline, answer nothing and unload from the "
         f"graphics card, until `!{args.username} on`. Owner or Manage bots only.\n"
@@ -914,6 +916,8 @@ def answer(message, optional=False):
                        said={"action": "react", "emoji": decided["emoji"]}))
         return
     thread, reply_to = message.thread, None
+    if message.room_id in bot.store.get("always", []) and not message.thread and action == "thread":
+        action = "message"   # a channel that is its own is one conversation: no threads opened there
     if action == "thread" and not message.direct:
         thread = message.thread or target
     elif action == "reply":
@@ -1148,6 +1152,34 @@ def forget(message, words):
     bot.store.setdefault("forgot", {})[f"{message.room_id}/{message.thread or ''}"] = int(time.time() * 1000)
     bot.store.save()
     return "Forgotten. I start fresh from here."
+
+
+@bot.command("raw", help="what the model says to your words alone, with none of my instructions (for those who manage bots)")
+def raw(message, words):
+    """The model asked with nothing around the words: no character, no chat,
+    no form to answer in. For telling what is the model and what is the bot."""
+    if not bot.may(message.sender_id):
+        return "Only the owner, or someone whose role has Manage bots, can ask the model directly."
+    asked = message.body.strip()[len(bot.prefix) + len("raw"):].strip()
+    if not asked:
+        return f"Say what to ask it, like `{bot.prefix}raw tell me a joke`."
+
+    def ask(message):
+        ready_the_card()
+        request = urllib.request.Request(
+            args.api.rstrip("/") + "/chat/completions",
+            data=json.dumps({"model": model_now(), "stream": False, "max_tokens": args.max_tokens,
+                             "messages": [{"role": "user", "content": asked}]}).encode(),
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=300) as answer:
+                said = json.load(answer)["choices"][0]["message"]["content"].strip()
+        except Exception as error:  # noqa: BLE001
+            said = f"The model did not answer: {error}"
+        for part in pieces(f"`{model_now()}`, asked only that:\n\n{said or '(nothing)'}"):
+            bot.say(message.room_id, part, thread=message.thread)
+    bot.work(ask, message)
+    return None
 
 
 @bot.command("model", help="what I think with, and how long my last answer took")
