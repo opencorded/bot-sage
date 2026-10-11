@@ -18,7 +18,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir corded && cd corded
-          gh release download --repo AndrewCromar/corded --pattern 'corded-v*-linux-x86_64.tar.gz'
+          # Corded's releases are marked pre-release for now, so "the latest" has to be asked for by name.
+          tag=$(gh release list --repo AndrewCromar/corded --limit 30 --json tagName -q '[.[] | select(.tagName | startswith("v"))][0].tagName')
+          echo "testing against Corded $tag"
+          gh release download "$tag" --repo AndrewCromar/corded --pattern 'corded-v*-linux-x86_64.tar.gz'
           tar -xzf corded-v*-linux-x86_64.tar.gz --strip-components=1
           ls
       - name: ffmpeg, for the previews of pictures
