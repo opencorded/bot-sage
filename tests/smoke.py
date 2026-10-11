@@ -102,6 +102,8 @@ class Model(BaseHTTPRequestHandler):
             words = json.dumps({"action": "reply", "to": 1, "text": "The first."})
         elif "long" in last:
             words = json.dumps({"action": "message", "text": "\n\n".join(["A paragraph of words. " * 60] * 6)})
+        elif "cut short" in last:
+            words = '{"action": "message", "text": "It began well, and then \\"it'
         elif "empty" in last:
             words = "{}"
         elif "plain" in last:
@@ -289,6 +291,8 @@ def main():
         alice.say("#general", "say it plain")
         plain = wait_for("plain words", alice_heard, lambda m: m.body.startswith("Just words"))
         assert "@everyone" not in plain.body and plain.reply_to
+        alice.say("#general", "@sage one that is cut short")
+        wait_for("the words out of an unfinished form", alice_heard, lambda m: m.body == 'It began well, and then "it')
         # A model that returns the form with nothing in it is not quoted: a nod instead.
         heard = len(alice_heard)
         alice.say("#general", "@sage an empty one")
@@ -324,8 +328,7 @@ def main():
         assert "Made: Captain, and that is who I am now" in system() and "You are Captain, an old sailor" in system(), \
             "a new one is put on at once and confirms itself"
         alice.say("#general", "@sage which personalities do you have")
-        time.sleep(3)
-        assert "exactly these and no others: Captain (the one you are now), sage" in system()
+        wait_for("its list, said as it is", alice_heard, lambda m: "- **Captain** (who I am now)" in m.body and "- **sage**" in m.body)
         for _ in range(50):
             if shown_name() == "Captain":
                 break

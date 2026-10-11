@@ -677,10 +677,9 @@ def decide(message, lines):
             r"\bselfie\b|what (do|does|would) (yo)?u look like|show (me )?(yo)?ur(self| face)|(pic|picture|photo) of (yo)?u(rself)?\b",
             said, re.IGNORECASE):
         found, do = {"do": "look"}, "look"
-    if not plain and do in (None, "none") and re.search(
-            r"\b(which|what|list|how many|show)\b.{0,40}\b(personalit|persona|character|mode)", message.body, re.IGNORECASE):
-        found = {"do": "list"}
-        do = "list"
+    if not plain and re.search(r"\b(which|what|list|how many|show)\b.{0,40}\b(personalit|persona|character)", said,
+                               re.IGNORECASE) and not re.search(r"\b(make|create|new|delete|remove|switch)\b", said, re.IGNORECASE):
+        return {"do": "list"}   # asked which it has: answered from the list, whatever the model made of it
     allowed = ("picture",) if plain else ("picture", "look", "pfp", "remember", "list", "switch", "create", "change", "delete")
     if do not in allowed:
         return {"do": "none"}
@@ -927,6 +926,13 @@ def understand(words, direct):
         # The form with nothing in it: there are no words to send. A nod instead.
         return {"action": "react", "to": None, "text": "", "emoji": "👍"}
     if not isinstance(decided, dict):
+        # The form begun and not finished (it ran out of room): its words are taken out of it.
+        cut = re.search(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)', words) if words.lstrip().startswith("{") else None
+        if cut:
+            try:
+                words = json.loads('"' + cut.group(1).rstrip("\\") + '"')
+            except ValueError:
+                words = cut.group(1)
         return {"action": "message" if direct else "reply", "to": None, "text": words, "emoji": ""}
     action = str(decided.get("action", "")).lower()
     text = decided.get("text")
@@ -995,7 +1001,19 @@ def answer(message, optional=False):
             return
     threading.Thread(target=show_typing, daemon=True).start()
     try:
-        done = grant(decide(message, lines), message)
+        asked = decide(message, lines)
+        if asked.get("do") == "list":
+            # A matter of fact, said as it is: a small model asked to pass a list on embroiders it.
+            thinking.set()
+            now = worn()
+            listed = "\n".join(f"- **{name}**{' (who I am now)' if which == now else ''}" for which, name in personas().items())
+            text = f"I have these:\n{listed}\nDescribe a new one and I will become it, or tell me to switch."
+            sent = bot.reply(message, text)
+            remember(message.room_id, message.thread, entry((sent or {}).get("event_id", ""), args.username, text, mine=True,
+                                                            said={"action": "reply", "text": text}))
+            note(f"{message.sender}: listed its personalities")
+            return
+        done = grant(asked, message)
         try:
             words = ask_model(message, lines, done)
         except urllib.error.HTTPError:
