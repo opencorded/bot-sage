@@ -1,0 +1,27 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  smoke:
+    name: Against a real server
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: The bot kit
+        run: ./setup.sh
+      - name: A Corded release to test against
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir corded && cd corded
+          gh release download --repo AndrewCromar/corded --pattern 'corded-v*-linux-x86_64.tar.gz'
+          tar -xzf corded-v*-linux-x86_64.tar.gz --strip-components=1
+          ls
+      - name: ffmpeg, for the previews of pictures
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Run
+        run: LD_LIBRARY_PATH=$PWD/corded python3 -u tests/smoke.py $PWD/corded

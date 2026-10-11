@@ -1,0 +1,46 @@
+{
+  "name": "sage",
+  "title": "Sage",
+  "about": "A chat member run by a language model on your own machine",
+  "kind": "bot",
+  "needs": {
+    "programs": [
+      "ollama (or another OpenAI-compatible model server)"
+    ],
+    "optional": [
+      "ffmpeg"
+    ]
+  },
+  "start": [
+    "python3",
+    "-u",
+    "ai_bot.py",
+    "{server}",
+    "--soul",
+    "soul.example.txt",
+    "--username",
+    "sage",
+    "--display-name",
+    "Sage",
+    "--vault",
+    "{vault}"
+  ],
+  "commands": [
+    {
+      "name": "ai",
+      "help": "here | here always | leave | where"
+    },
+    {
+      "name": "persona",
+      "help": "its personalities"
+    },
+    {
+      "name": "forget",
+      "help": "forget this chat"
+    },
+    {
+      "name": "model",
+      "help": "which model, how fast"
+    }
+  ]
+}

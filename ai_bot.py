@@ -43,6 +43,7 @@ import argparse
 import base64
 import json
 import os
+import sys
 import re
 import shutil
 import subprocess
@@ -52,7 +53,16 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from corded_bot import Bot
+# The kit (corded_bot.py) is found where CORDED_BOT_KIT says, beside this
+# file, in ./kit (where setup.sh puts it), or in a bot-kit folder next to
+# this repository.
+_here = os.path.dirname(os.path.abspath(__file__))
+for _kit in (os.environ.get("CORDED_BOT_KIT", ""), _here, os.path.join(_here, "kit"), os.path.join(_here, "..", "bot-kit")):
+    if _kit and os.path.exists(os.path.join(_kit, "corded_bot.py")):
+        sys.path.insert(0, os.path.abspath(_kit))
+        break
+from corded_bot import Bot  # noqa: E402
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_SOUL = ("You are {name}, a member of a small group chat among friends. You are short, warm and a little dry. "
