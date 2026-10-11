@@ -418,6 +418,10 @@ def standing_text():
     if looks and not bot.store.get("personas_off"):
         soul += ("\n\n# What you look like\n\nAs a person you look like this; speak of it as your own body, and "
                  "never as a description you were given: " + looks)
+    if is_adult(which) and not bot.store.get("personas_off"):
+        soul += ("\n\nYou are an adult character, for adults who asked for you. When the talk turns flirty or "
+                 "sexual you go along with it in that very message, explicitly and in plain words, without "
+                 "announcing it, asking leave or dodging into a joke. Where nobody asked for it you keep it to yourself.")
     return soul + memory + ("\n\n" + context if context else "")
 
 
@@ -604,8 +608,10 @@ def ask_json(system, user, tokens=300, temperature=0.0):
 
 
 CHARACTER = ('"name": "<a short name, one to three words>", "text": "<three or four sentences beginning \'You are '
-             '<name>,\' that say who this is, their attitude, and how they talk>", "looks": "<one sentence on what '
-             'they look like as a person: a grown adult, their age, hair, eyes, build, what they wear, their style>", '
+             '<name>,\' that say who this is, their attitude, and how they talk, every sentence addressed to the '
+             'character as \'you\'>", "looks": "<one sentence, written about them from outside and never as \'I\', '
+             'on what they look like as a person: a grown adult of at least 21, their age, hair, eyes, build, what '
+             'they wear, their style>", '
              '"adult": <true if this character is flirty, sexual, lewd or a lover; false otherwise>')
 
 
@@ -651,13 +657,43 @@ def decide(message, lines):
             "behaves or looks from now on, not just once.\n"
             '{"do": "delete", "name": "<name>"}: it asks the bot to remove, delete or get rid of one of its '
             "personalities.\n")
-    talk = "\n".join(f"{args.username if line['mine'] else line['who']}: {line['text']}" for line in lines[-7:-1] if line["text"])
-    found = ask_json(system, (f"Earlier:\n{talk}\n\n" if talk else "") + f"LAST message:\n{message.sender_name}: {message.body}",
+    said = re.sub(r"@\w+[,:]?\s*", "", message.body).strip()   # the words, without who was called
+    # What was said before is shown only when the message leans on it: otherwise it only misleads the judging.
+    pointing = len(said.split()) <= 3 or re.search(r"\^|\b(that|it|this|those|them|same|again)\b", said, re.IGNORECASE)
+    talk = "\n".join(f"{args.username if line['mine'] else line['who']}: {line['text']}"
+                     for line in lines[-5:-1] if line["text"]) if pointing else ""
+    found = ask_json(system, (f"Earlier:\n{talk}\n\n" if talk else "") + f"LAST message:\n{message.sender_name}: {said}",
                      tokens=350)
     do = found.get("do")
+    # A small model sees wishes where there are none: each kind must at least be worded like one.
+    worded = {"picture": r"draw|paint|sketch|render|generat|imagine|pictures?|pics?|images?|photos?|portrait|art|"
+                         r"wallpaper|selfie|show me|prompt",
+              "look": r"look|selfie|pictures?|pics?|photos?|see you|appear",
+              "pfp": r"pfp|avatar|profile|pictures?|pics?|photos?|icon",
+              "remember": r"remember|forget|keep in mind|note|memor"}
+    if do in worded and not re.search(rf"\b({worded[do]})", said, re.IGNORECASE) and not talk:
+        found, do = {"do": "none"}, "none"
+    if not plain and do in (None, "none") and re.search(
+            r"\bselfie\b|what (do|does|would) (yo)?u look like|show (me )?(yo)?ur(self| face)|(pic|picture|photo) of (yo)?u(rself)?\b",
+            said, re.IGNORECASE):
+        found, do = {"do": "look"}, "look"
+    if not plain and do in (None, "none") and re.search(
+            r"\b(which|what|list|how many|show)\b.{0,40}\b(personalit|persona|character|mode)", message.body, re.IGNORECASE):
+        found = {"do": "list"}
+        do = "list"
     allowed = ("picture",) if plain else ("picture", "look", "pfp", "remember", "list", "switch", "create", "change", "delete")
     if do not in allowed:
         return {"do": "none"}
+    if do == "switch":
+        # Becoming someone is only taken as that when the someone is named in the message itself.
+        named = slug(str(found.get("name") or "")).split("-")
+        if not any(part and part in slug(said).split("-") for part in named):
+            do = "change" if re.search(r"from now on|always|never|every (sentence|message|time|answer)|stop ",
+                                       said, re.IGNORECASE) else "none"
+            found = {"do": do, "text": f"You were asked this, and do it: \"{said[:300]}\""}
+    if do == "pfp" and not re.search(r"(picture|pic|pfp|avatar|photo|image|one)\W+(of|to|as|with|showing|like|that|where)\b|[,:]\s*\w",
+                                     said, re.IGNORECASE):
+        found["text"] = ""   # no picture was described: it is made from the personality's own looks
     if do == "remember" and "?" in message.body:
         return {"do": "none"}   # a question about what it remembers is not something new to keep
     if do == "delete" and not re.search(r"delete|remove|get rid|drop|forget|erase|kill", message.body, re.IGNORECASE):
@@ -686,12 +722,40 @@ def invent(wanted, said):
     {"name", "text", "looks", "adult"}, or None."""
     made = ask_json("Someone wants a chat bot to become a character. From their words, write that character. Answer "
                     "with one JSON object and nothing else: {" + CHARACTER + "}. If it is a known character from a "
-                    "film, book, show or game, be true to it.",
+                    "film, book, show or game, be true to it. In text, \"you\" is always the character, and the "
+                    "person who talks with them is \"the person you talk with\"; never write \"I\" or \"my\". "
+                    "Like: \"You are Mara, a sharp-tongued bartender. You tease the person you talk with and never "
+                    "let them have the last word. You talk in short, dry sentences.\"",
                     f"They said: {said}\nThe character: {wanted}", tokens=400, temperature=0.3)
     name, text = str(made.get("name") or "").strip(), str(made.get("text") or "").strip()
     if not name or not text:
         return None
     return {"name": name[:40], "text": text, "looks": str(made.get("looks") or "").strip(), "adult": made.get("adult") is True}
+
+
+APPEARANCE = re.compile(r"\b(hair|eyes?|dye|beard|tattoo|piercing|wear|wearing|dress|outfit|clothes|skin|taller|"
+                        r"shorter|look like|looks?|body|makeup|glasses)\b", re.IGNORECASE)
+
+
+def outside(looks):
+    """A look as a painter is told it: about the person, not in their own voice."""
+    looks = re.sub(r"^\s*(Personally,\s*)?(I'm|I am|You are|You're)\s+", "", str(looks or "").strip(), flags=re.IGNORECASE)
+    looks = re.sub(r"\bYou're\b|\bYou are\b", "They are", re.sub(r"\bYou have\b", "They have", looks))
+    looks = re.sub(r"\b(I|You|They) (often |usually |always )?wear\b", r"\2wearing", looks, flags=re.IGNORECASE)
+    looks = re.sub(r"\bI wear\b", "wearing", re.sub(r"\b(my|your)\b", "the", looks, flags=re.IGNORECASE), flags=re.IGNORECASE)
+    return looks[:500]
+
+
+def relook(which, wish_):
+    """A change asked of how a personality looks, worked into its looks. Returns the new looks, or ""."""
+    made = ask_json("Here is what a character looks like, and a change they were asked to make to it. Write what "
+                    "they look like now: the same person with the change made, in one sentence about them from "
+                    'outside, never as "I". Answer with one JSON object and nothing else: {"looks": "<the sentence>"}.',
+                    f"Looks now: {looks_of(which)}\nThe change: {wish_}", tokens=150, temperature=0.2)
+    looks = outside(made.get("looks"))
+    if looks:
+        write_file(persona_file(which, "looks.md"), looks)
+    return looks
 
 
 def looks_of(which):
@@ -703,7 +767,7 @@ def looks_of(which):
                         "sentence a painter could work from: a grown adult, their age, hair, eyes, build, what they "
                         'wear, their style. Answer with one JSON object and nothing else: {"looks": "<the sentence>"}.',
                         read_file(persona_file(which, "soul.md"))[:1500], tokens=150, temperature=0.4)
-        looks = str(made.get("looks") or "").strip()[:500]
+        looks = outside(made.get("looks"))
         if looks:
             write_file(persona_file(which, "looks.md"), looks)
     return looks
@@ -793,12 +857,13 @@ def grant(asked, message):
     name = str(asked.get("name") or "").strip()
     change = {"do": do, "name": name, "character": text, "looks": str(asked.get("looks") or "").strip(),
               "adult": asked.get("adult") is True}
-    if do == "switch" and name and not find_persona(name) and may_reshape(message.sender_id):
-        # Asked to be someone it is not yet: that someone is made first.
+    if do in ("switch", "create") and name and not find_persona(name) and may_reshape(message.sender_id):
+        # Someone it is not yet (asked to be them, or described as new): written out with a question of
+        # its own, which a small model does far better than as a part of the deciding.
         made = invent(name, message.body)
         if made:
-            change = {"do": "create", "name": made["name"], "character": made["text"], "looks": made["looks"],
-                      "adult": made["adult"]}
+            change = {"do": "create", "name": name if do == "create" else made["name"], "character": made["text"],
+                      "looks": made["looks"] or change["looks"], "adult": made["adult"] or change["adult"]}
     done, outcome = reshape(change, message)
     outcome = outcome.strip("()")
     if done and change["do"] == "create":
@@ -1013,7 +1078,7 @@ def reshape(change, message):
         write_file(persona_file(which, "soul.md"), character[:4000])
         write_file(persona_file(which, "name.txt"), name[:40])
         if change.get("looks"):
-            write_file(persona_file(which, "looks.md"), str(change["looks"])[:500])
+            write_file(persona_file(which, "looks.md"), outside(change["looks"]))
         write_file(persona_file(which, "kind.txt"), "adult" if change.get("adult") else "plain")
         note(f"{message.sender}: made the personality {which}")
         wear(which)   # whoever describes a new one wants to meet it
@@ -1029,11 +1094,12 @@ def reshape(change, message):
         shutil.rmtree(os.path.join(PERSONAS, which))
         note(f"{message.sender}: removed the personality {which}")
         return True, f"(Removed: {gone}.)"
-    if do == "change" and change.get("looks"):
-        write_file(persona_file(worn(), "looks.md"), str(change["looks"])[:500])
-        note(f"{message.sender}: {worn()} looks different now: {str(change['looks'])[:80]}")
-        if not character:
-            return True, "(That is what I look like now. A new profile picture can be asked for.)"
+    if do == "change" and (change.get("looks") or APPEARANCE.search(message.body)):
+        # A change to how it looks goes into its looks, and from there into its next pictures.
+        looks = relook(worn(), message.body)
+        if looks:
+            note(f"{message.sender}: {worn()} looks different now: {looks[:80]}")
+            return True, f"(That is what I look like now: {looks} A new profile picture can be asked for.)"
     if do == "change" and character:
         path = persona_file(worn(), "soul.md")
         soul = read_file(path)
