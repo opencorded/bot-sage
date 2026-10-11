@@ -1074,7 +1074,13 @@ def hear(message):
     lately = [line for line in before[-6:] if not line["mine"]]
     alone = (len(bot.rooms.get(message.room_id, {}).get("members", [])) <= 2
              or all(line["who"] == message.sender_name for line in lately))
-    always = message.room_id in bot.store.get("always", [])   # a channel that is its own: `!ai here always`
+    if message.thread and before and not before[0]["mine"] and before[0]["who"] != message.sender_name:
+        # A thread under a third person's message is those two talking; the bot joins only when called.
+        chosen = following = carrying_on = False
+        alone = False
+    # A channel that is its own (`!ai here always`): everything said in it is for the bot, but
+    # not what is said in a thread there, which is a conversation of whoever is in it.
+    always = message.room_id in bot.store.get("always", []) and not message.thread
     must = message.direct or message.mentions_me or answering or always or ((chosen or following) and alone)
     if not (must or chosen or following or carrying_on):
         return
