@@ -134,6 +134,24 @@ machine that reaches the server; it does not have to be the server's.
 To keep it running, and to see it on a page with everything else, list it in
 the [host](https://github.com/opencorded/host).
 
+## Personalities
+
+With personalities on (its page in the app, or `!persona on`), Sage can be
+several characters and wears one at a time. Nothing needs a command: before
+each answer a decision step reads what was said and works out whether it
+asks for something to be done ("be my grumpy sailor", "switch to Ruby",
+"from now on talk like a pirate", "remember that ...", "what do you look
+like?", "new profile picture, a red fox", "get rid of Ruby"), and the bot
+then does it. Each personality keeps its character, what it looks like as a
+person, its own memories and its own profile picture, which it makes itself
+from its looks when it is created.
+
+A personality made flirty or lewd is marked adult. On Sage's page the owner
+can choose a **Model for adult personalities** and a **Picture model for
+adult personalities**; such a personality then thinks with the one and has
+its pictures made with the other. The picture bot's own rule still decides
+where adult pictures may appear.
+
 ## Pictures
 
 Sage makes no pictures itself. Asked for one ("draw me ...", "write a good

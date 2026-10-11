@@ -4,6 +4,7 @@ checks where and how it answers.
 
     python3 tests/smoke.py <folder with cordedd and corded-cli>
 """
+import base64
 import json
 import os
 import shutil
@@ -62,31 +63,26 @@ class Model(BaseHTTPRequestHandler):
             return
         last = [m for m in body["messages"] if m["role"] == "user"][-1]["content"].lower()
         first = body["messages"][0]["content"]
-        if "for_bot" not in first and "decide whether it asks" not in first and "make a picture now" not in first:
+        if "for_bot" not in first and "decide whether it asks" not in first:
             asked.append(body)
-        if "does it ask the bot to make a picture now" in first:
-            # The question asked first about a message that sounds like wanting a picture.
-            last = last.split("last message:")[-1]
-            words = json.dumps({"draw": True, "prompt": "!imagine a heron at dawn, soft light --hot", "size": "wide"}
-                               if "draw me" in last else {"draw": False})
-            answer = json.dumps({"choices": [{"message": {"content": words}}]}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(answer)
-            return
         if "decide whether it asks the bot to do one of a few things" in body["messages"][0]["content"]:
-            # The question asked first about a message that sounds like a wish.
-            if "remember that" in last:
+            # The step before every answer: what the message asks the bot to do.
+            last = last.split("last message:")[-1]
+            if "draw me" in last:
+                words = json.dumps({"do": "picture", "prompt": "!imagine a heron at dawn, soft light --hot", "size": "wide"})
+            elif "what do you look like" in last:
+                words = json.dumps({"do": "look"})
+            elif "remember that" in last:
                 words = json.dumps({"do": "remember", "text": "alice takes her tea without milk"})
             elif "new personality" in last:
-                words = json.dumps({"do": "create", "name": "Captain", "text": "You are Captain, an old sailor. You talk like one."})
+                words = json.dumps({"do": "create", "name": "Ruby" if "lewd" in last else "Captain", "text": "You are Captain, an old sailor. You talk like one.",
+                                    "looks": "a weathered man of sixty in a blue coat", "adult": "lewd" in last})
             elif "switch to" in last:
                 words = json.dumps({"do": "switch", "name": "captain"})
             elif "from now on" in last:
                 words = json.dumps({"do": "change", "text": "You end every answer with arr."})
             elif "profile picture" in last:
-                words = json.dumps({"do": "picture", "text": "an owl wearing a sailor's cap"})
+                words = json.dumps({"do": "pfp", "text": "an owl wearing a sailor's cap"})
             elif "which personalities" in last:
                 words = json.dumps({"do": "list"})
             else:
@@ -450,6 +446,11 @@ def main():
         @painter.offer("picture")
         def picture(args, asker, via):
             wanted.append((args, (asker or {}).get("username"), via))
+            if "room_id" not in args:   # a profile picture: the file goes back
+                path = os.path.join(tmp, "face.png")
+                with open(path, "wb") as f:
+                    f.write(base64.b64decode(PNG))
+                return {"file": path}
             return {"posted": True} if "refuse" not in args.get("prompt", "") else {"ok": False, "message": "not here"}
         painter.connect(address)
         threading.Thread(target=painter.run, daemon=True).start()
@@ -493,6 +494,35 @@ def main():
         wait_for("a refusal", bob_heard, lambda m: "can ask the model directly" in m.body)
         print("ok  pictures: asks the picture bot for the person, under their message; stays out of what is said "
               "to other bots; never types a command")
+
+        # A personality has looks and a kind; an adult one thinks and draws with the models chosen for those.
+        page(alice, "m.bot.set", key="adult_model", value="other:1b")
+        page(alice, "m.bot.set", key="adult_picture_model", value="spicy")
+        seen = len(wanted)
+        alice.say("#general", "@sage a new personality: a lewd pirate queen")
+        for _ in range(100):   # its first profile picture is asked for after the answer
+            if len(wanted) > seen:
+                break
+            time.sleep(0.2)
+        assert asked[-1]["model"] == "other:1b", "an adult personality did not think with the model chosen for those"
+        assert "a weathered man of sixty" in asked[-1]["messages"][0]["content"], "it is not told what it looks like"
+        assert wanted[-1][0].get("model") == "spicy" and "a weathered man of sixty" in wanted[-1][0]["prompt"], wanted[-1]
+        seen = len(wanted)
+        alice.say("#general", "@sage what do you look like")
+        for _ in range(100):
+            if len(wanted) > seen:
+                break
+            time.sleep(0.2)
+        assert wanted[-1][0]["prompt"].startswith("a weathered man of sixty") and wanted[-1][0].get("room_id"), wanted[-1]
+        alice.say("#general", "!persona show")
+        wait_for("its looks and kind", alice_heard, lambda m: "a weathered man of sixty" in m.body and "an adult personality" in m.body)
+        alice.say("#general", "!persona use sage")
+        wait_for("the plain one back", alice_heard, lambda m: "Now: sage" in m.body)
+        alice.say("#general", "@sage and which model now")
+        time.sleep(3)
+        assert asked[-1]["model"] == "qwen2.5:7b", asked[-1]["model"]
+        print("ok  personalities: looks and a kind of their own; an adult one uses the models chosen for those; "
+              "\"what do you look like\" asks for its picture")
         print("all AI bot checks passed")
     finally:
         for p in started:
