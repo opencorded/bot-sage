@@ -515,7 +515,9 @@ def personalities_text():
         "one, `!persona forget` empties the memories of the one you are. Switching, making and changing them is "
         + ("open to everyone here." if bot.store.get("personas_open") else
            "for the owner and people whose role has Manage bots (`!persona open on` lets everyone).")
-        + " Anyone can ask you to remember something.")
+        + " Anyone can ask you to remember something. A personality made flirty or lewd is an adult one: it "
+        "thinks with the model chosen for those on your page in the app, and its pictures come from the picture "
+        "model chosen for those, so yes, different personalities can run on different models.")
 
 
 def ready_the_card():
@@ -651,10 +653,12 @@ def decide(message, lines):
             "or change if meant from now on.\n"
             '{"do": "create", ' + CHARACTER + "}: it describes a new personality, persona or character for the bot "
             "to have or become, saying what it is like (\"make a persona who ...\", \"I want you to be my ... "
-            "girlfriend\", \"new character: ...\"). Use what the message says and fill in the rest to fit.\n"
+            "girlfriend\", \"new character: ...\", \"can you make one where you are X\"). Use what the message "
+            "says and fill in the rest to fit.\n"
             '{"do": "change", "text": "<how to be, one sentence beginning \'You\'>", "looks": "<only if it changes '
             'what the bot looks like: the new look in one sentence>"}: it asks the bot to change how it itself talks, '
-            "behaves or looks from now on, not just once.\n"
+            "behaves or looks from now on, not just once (\"talk like a pirate from now on\", \"make your hair "
+            "blue\", \"can you have a red suit\", \"wear glasses\").\n"
             '{"do": "delete", "name": "<name>"}: it asks the bot to remove, delete or get rid of one of its '
             "personalities.\n")
     said = re.sub(r"@\w+[,:]?\s*", "", message.body).strip()   # the words, without who was called
@@ -673,6 +677,17 @@ def decide(message, lines):
               "remember": r"remember|forget|keep in mind|note|memor"}
     if do in worded and not re.search(rf"\b({worded[do]})", said, re.IGNORECASE) and not talk:
         found, do = {"do": "none"}, "none"
+    if not plain and do in (None, "none") and not said.rstrip().endswith("?") or (
+            not plain and do in (None, "none") and re.search(r"^(can|could|will|would) (yo)?u\b", said, re.IGNORECASE)):
+        # Said plainly enough that it needs no judging: a small model lets these pass as talk.
+        if re.search(r"\b(make|create|add|invent|i want|i need|give me)\b.{0,40}\b(persona|personality|character|one "
+                     r"where (yo)?u)\b|\b(be|as|become|you are|you're) my .{0,30}(girlfriend|boyfriend|gf|bf|wife|husband)\b",
+                     said, re.IGNORECASE):
+            found, do = {"do": "create", "name": ""}, "create"
+        elif (APPEARANCE.search(said) and re.search(r"\b(yo)?u(r|rself)?\b", said, re.IGNORECASE)
+              and re.search(r"\b(make|change|have|give|dye|wear|turn|update|get|grow|cut|put on|should|from now)\b", said, re.IGNORECASE)
+              and not re.search(r"\b(pfp|avatar|profile|picture|pic|photo|selfie)\b", said, re.IGNORECASE)):
+            found, do = {"do": "change", "text": "", "looks": said}, "change"
     if not plain and do in (None, "none") and re.search(
             r"\bselfie\b|what (do|does|would) (yo)?u look like|show (me )?(yo)?ur(self| face)|(pic|picture|photo) of (yo)?u(rself)?\b",
             said, re.IGNORECASE):
@@ -739,6 +754,11 @@ APPEARANCE = re.compile(r"\b(hair|eyes?|dye|beard|tattoo|piercing|wear|wearing|d
 def outside(looks):
     """A look as a painter is told it: about the person, not in their own voice."""
     looks = re.sub(r"^\s*(Personally,\s*)?(I'm|I am|You are|You're)\s+", "", str(looks or "").strip(), flags=re.IGNORECASE)
+    # Every personality is a grown adult, whatever the model or the character's story says.
+    looks = re.sub(r"\b(late|mid|early)[- ]?teens\b|\bteens\b", "early twenties", looks, flags=re.IGNORECASE)
+    looks = re.sub(r"\b(1[0-9]|[1-9])([- ]years?[- ]old)", r"22\2", looks, flags=re.IGNORECASE)
+    looks = re.sub(r"\bteenaged?\b|\bteenager\b|\badolescent\b", "young adult", looks, flags=re.IGNORECASE)
+    looks = re.sub(r"\b(school)?girl\b", "woman", re.sub(r"\b(school)?boy\b", "man", looks, flags=re.IGNORECASE), flags=re.IGNORECASE)
     looks = re.sub(r"\bYou're\b|\bYou are\b", "They are", re.sub(r"\bYou have\b", "They have", looks))
     looks = re.sub(r"\b(I|You|They) (often |usually |always )?wear\b", r"\2wearing", looks, flags=re.IGNORECASE)
     looks = re.sub(r"\bI wear\b", "wearing", re.sub(r"\b(my|your)\b", "the", looks, flags=re.IGNORECASE), flags=re.IGNORECASE)
@@ -806,6 +826,11 @@ def hand_to_painter(message, wanted, what):
         return (f"They asked you for {what}. You asked @{painter()}, the picture bot, for it, and it was not "
                 f"made. What it said: \"{got.get('message') or 'no'}\" Tell them that, briefly, in your own voice.")
     note(f"{message.sender}: asked {painter()} for: {wanted['prompt'][:80]}")
+    if not message.direct:
+        # The picture bot is drawing now and holds the graphics card: thinking up a line
+        # about it would only fight it for the card. A nod, and the picture speaks.
+        bot.attempt(bot.react, message, "🎨")
+        return None
     if message.direct:
         return (f"They asked you for {what}. You had @{painter()} make it from this description: "
                 f"\"{wanted['prompt']}\", and it is in the chat now, above. Say a few words about it in your own "
@@ -856,12 +881,12 @@ def grant(asked, message):
     name = str(asked.get("name") or "").strip()
     change = {"do": do, "name": name, "character": text, "looks": str(asked.get("looks") or "").strip(),
               "adult": asked.get("adult") is True}
-    if do in ("switch", "create") and name and not find_persona(name) and may_reshape(message.sender_id):
+    if do in ("switch", "create") and (name or do == "create") and not find_persona(name or "\0") and may_reshape(message.sender_id):
         # Someone it is not yet (asked to be them, or described as new): written out with a question of
         # its own, which a small model does far better than as a part of the deciding.
         made = invent(name, message.body)
         if made:
-            change = {"do": "create", "name": name if do == "create" else made["name"], "character": made["text"],
+            change = {"do": "create", "name": name if do == "create" and name else made["name"], "character": made["text"],
                       "looks": made["looks"] or change["looks"], "adult": made["adult"] or change["adult"]}
     done, outcome = reshape(change, message)
     outcome = outcome.strip("()")
@@ -1014,6 +1039,10 @@ def answer(message, optional=False):
             note(f"{message.sender}: listed its personalities")
             return
         done = grant(asked, message)
+        if done is None:   # seen to, and nothing to say about it
+            thinking.set()
+            talking_to[(message.room_id, message.thread or "")] = (message.sender_id, time.time())
+            return
         try:
             words = ask_model(message, lines, done)
         except urllib.error.HTTPError:
@@ -1117,7 +1146,8 @@ def reshape(change, message):
         looks = relook(worn(), message.body)
         if looks:
             note(f"{message.sender}: {worn()} looks different now: {looks[:80]}")
-            return True, f"(That is what I look like now: {looks} A new profile picture can be asked for.)"
+            bot.work(first_picture, worn(), message.sender_id)   # after the answer: the face to match
+            return True, f"(That is what I look like now: {looks} A profile picture to match is being made.)"
     if do == "change" and character:
         path = persona_file(worn(), "soul.md")
         soul = read_file(path)
