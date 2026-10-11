@@ -80,8 +80,11 @@ parser.add_argument("--display-name", default=None)
 parser.add_argument("--picture", default=os.path.join(HERE, "ai_bot.png"),
                     help="its profile picture, a small square image ('' for none)")
 parser.add_argument("--vault", default=None)
-parser.add_argument("--pictures", default="http://127.0.0.1:7860",
-                    help="a picture program on this machine (image_server.py), for making its own profile pictures; '' for none")
+parser.add_argument("--pictures-bot", default="pictures",
+                    help="the username of a picture bot on the server, asked for its own profile pictures; '' for none")
+parser.add_argument("--pictures", default="",
+                    help="a picture program on this machine (image_server.py) that shares the graphics card: asked to "
+                         "step aside before the model thinks, and drawn from directly when there is no picture bot")
 parser.add_argument("--memory", type=int, default=30, help="how many recent messages of a chat it keeps in mind")
 parser.add_argument("--max-tokens", type=int, default=400, help="the longest answer the model may write")
 parser.add_argument("--follow-up", type=int, default=120,
@@ -118,6 +121,7 @@ bot.setting("everyone_reshapes", "switch", "Anyone may switch and change my pers
             get=lambda: bool(bot.store.get("personas_open")), set=lambda v: keep_setting("personas_open", bool(v)))
 bot.info("model", "Model", get=lambda: args.model)
 bot.info("speed", "Last answer took", get=lambda: f"{last_answer['seconds']:.1f} s" if last_answer["seconds"] is not None else "nothing yet")
+bot.show_status()
 
 ACTIONS = ("message", "reply", "thread", "react")
 recent = {}        # (room id, thread root or "") -> the last few messages there, oldest first
@@ -276,26 +280,41 @@ def keep(fact, who):
     write_file(path, "\n".join(lines[-400:]))
 
 
-def paint_itself(description):
-    """A new profile picture for the worn personality, drawn by the picture
-    program on this machine from a description. Returns why not, or ""."""
-    if not args.pictures:
-        return "no picture program is set up for me"
+def paint_itself(description, for_whom=""):
+    """A new profile picture for the worn personality, from a description.
+    The picture bot on the server is asked for it, on behalf of the person
+    who wanted it, so that bot's own rules decide; without one, a picture
+    program on this machine can be asked directly. Returns why not, or ""."""
     if not shutil.which("ffmpeg"):
         return "ffmpeg is not installed on my machine, and I need it to make the picture small"
     which = worn()
-    try:
-        request = urllib.request.Request(
-            args.pictures.rstrip("/") + "/sdapi/v1/txt2img",
-            data=json.dumps({"prompt": description[:600] + ", portrait, centred, simple background, profile picture",
-                             "negative_prompt": "text, watermark, frame, blurry, deformed", "width": 1024, "height": 1024,
-                             "steps": 25, "seed": -1, "cfg_scale": 7}).encode(),
-            headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(request, timeout=900) as answer:
-            drawn = base64.b64decode(json.load(answer)["images"][0])
-    except Exception as error:  # noqa: BLE001
-        note(f"no picture: {error}")
-        return "the picture program on my machine did not answer"
+    wanted = description[:600] + ", portrait, centred, simple background, profile picture"
+    painter = args.pictures_bot if any(m.get("username") == args.pictures_bot for m in bot.members().values()) else ""
+    if painter:
+        got = bot.ask_bot(painter, "picture", {"prompt": wanted, "no": "text, watermark, frame"},
+                          on_behalf_of=for_whom, timeout=900)
+        if not got.get("ok"):
+            return f"{painter} said: {got.get('message') or 'no'}"
+        try:
+            with open(got["file"], "rb") as f:
+                drawn = f.read()
+        finally:
+            if os.path.exists(got.get("file", "")):
+                os.remove(got["file"])
+    elif args.pictures:
+        try:
+            request = urllib.request.Request(
+                args.pictures.rstrip("/") + "/sdapi/v1/txt2img",
+                data=json.dumps({"prompt": wanted, "negative_prompt": "text, watermark, frame, blurry, deformed",
+                                 "width": 1024, "height": 1024, "steps": 25, "seed": -1, "cfg_scale": 7}).encode(),
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(request, timeout=900) as answer:
+                drawn = base64.b64decode(json.load(answer)["images"][0])
+        except Exception as error:  # noqa: BLE001
+            note(f"no picture: {error}")
+            return "the picture program on my machine did not answer"
+    else:
+        return "there is no picture bot on this server for me to ask"
     small = subprocess.run(["ffmpeg", "-v", "error", "-i", "pipe:0", "-vf", "scale=256:256", "-frames:v", "1",
                             "-q:v", "4", "-f", "mjpeg", "pipe:1"], input=drawn, capture_output=True, timeout=60).stdout
     if not small:
@@ -566,7 +585,7 @@ def grant(asked, message, said=""):
                     "whose role has Manage bots, can change that. Tell them so.")
         if not text:
             return ""
-        problem = paint_itself(text)
+        problem = paint_itself(text, message.sender_id)
         if problem:
             return f"They asked you for a new profile picture. It was not made: {problem}. Tell them so."
         return (f"At their request you have just made yourself a new profile picture and put it on: \"{text}\". "

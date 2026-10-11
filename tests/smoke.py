@@ -140,7 +140,7 @@ def main():
         def start_bot():
             p = subprocess.Popen([sys.executable, "ai_bot.py", address, "--api", f"http://127.0.0.1:{model_port}/v1",
                                   "--username", "sage", "--vault", os.path.join(tmp, "sage"), "--per-minute", "100",
-                                  "--pictures", f"http://127.0.0.1:{model_port}"],
+                                  "--pictures-bot", "", "--pictures", f"http://127.0.0.1:{model_port}"],
                                  cwd=bots, stdout=subprocess.PIPE, text=True)
             started.append(p)
             line = p.stdout.readline()
