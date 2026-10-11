@@ -467,6 +467,7 @@ def main():
         assert wanted[0][0] == {"prompt": "a heron at dawn, soft light", "size": "wide", "room_id": alice.room_id("#general"),
                                 "event_id": asking["event_id"]}, wanted
         assert "handed it to @painter" in asked[-1]["messages"][0]["content"], "it was not told what it had done"
+        assert not any("@sage and now" in m["content"] for m in asked[-1]["messages"][1:]), "what it forgot came back with a restart"
         alice.say("#general", "@sage what do herons eat? a picture book says fish")
         for _ in range(100):
             if len(asked) > requests + 1:

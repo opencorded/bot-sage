@@ -195,9 +195,11 @@ def history(room_id, thread):
             events = bot.request({"cmd": "fetch_timeline", "room_id": room_id, "limit": args.memory * 2})["events"]
             events = [e for e in events if (e.get("relation") or {}).get("kind") != "thread"]
             events.sort(key=lambda e: e.get("seq") or 0)
+        since = bot.store.get("forgot", {}).get(f"{room_id}/{thread or ''}", 0)   # `!forget`, kept across restarts
         for e in events:
             body = (e.get("content") or {}).get("body")
-            if e.get("type") == "m.text" and body and e.get("status") != "redacted":
+            if (e.get("type") == "m.text" and body and e.get("status") != "redacted"
+                    and not body.strip().startswith(bot.prefix) and (e.get("server_ts") or 0) > since):
                 found.append(entry(e.get("event_id", ""), e.get("sender_name") or e.get("sender_username", "?"),
                                    body, bool(e.get("mine"))))
     except (RuntimeError, KeyError):
@@ -510,6 +512,8 @@ def ask_model(message, lines, done=""):
         place = f"a thread in the channel {room.get('title', '')}"
     else:
         place = f"the channel {room.get('title', '')}"
+    if room.get("nsfw") and not message.direct:
+        place += ", which is marked NSFW: a place for adults, where explicit talk is at home"
     number = len(lines)
     situation = (
         f"# Right now\n\nYour name here is {args.username}. You are in {place}. The messages below are numbered. "
@@ -1139,6 +1143,8 @@ def channels(message, words):
 def forget(message, words):
     with lock:
         recent[(message.room_id, message.thread or "")] = []
+    bot.store.setdefault("forgot", {})[f"{message.room_id}/{message.thread or ''}"] = int(time.time() * 1000)
+    bot.store.save()
     return "Forgotten. I start fresh from here."
 
 
