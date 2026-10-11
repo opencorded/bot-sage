@@ -617,6 +617,38 @@ CHARACTER = ('"name": "<a short name, one to three words>", "text": "<three or f
              '"adult": <true if this character is flirty, sexual, lewd or a lover; false otherwise>')
 
 
+RENAMES = re.compile(r"\b(change|new|different|another|other|better|pick|choose|get)\b.{0,25}\bname\b|\brename\b|"
+                     r"\byour name (is|should be|will be)\b|\bcall yourself\b|\bname yourself\b|"
+                     r"\b(did ?n[o']?t|not) (change|update).{0,20}\bname\b|"
+                     r"\bname\b.{0,60}\b(choose|pick|else|another|different|change)\b", re.IGNORECASE)
+
+
+def rename(message):
+    """A new name for the personality it wears: the one asked for, or one it
+    picks to fit. Returns (done, what to say about it)."""
+    if not may_reshape(message.sender_id):
+        return False, "Only the owner, or someone whose role has Manage bots, can rename me."
+    which, known = worn(), personas()
+    made = ask_json("A chat bot plays a character and was asked to change the character's name. Answer with one JSON "
+                    'object and nothing else: {"name": "<the new name>"}. If the message gives the new name, use '
+                    "exactly that. If it gives none, choose a fitting first name for this character yourself. Never "
+                    "one of the names listed as taken or unwanted, and never a description like \"Sexy Girlfriend\".",
+                    f"The character: {read_file(persona_file(which, 'soul.md'))[:600]}\n"
+                    f"Taken or unwanted names: {', '.join(known.values())}\n"
+                    f"The message: {re.sub(r'@\w+[,:]?\s*', '', message.body).strip()}", tokens=40, temperature=0.7)
+    name = re.sub(r"[^\w '\-]", "", str(made.get("name") or "")).strip()[:40]
+    new = slug(name)
+    if not new or new in known or name.lower() in (n.lower() for n in known.values()):
+        return False, "No new name came to mind that I do not already have. Tell me the name you want."
+    os.rename(os.path.join(PERSONAS, which), os.path.join(PERSONAS, new))
+    write_file(persona_file(new, "name.txt"), name)
+    soul = read_file(persona_file(new, "soul.md"))
+    write_file(persona_file(new, "soul.md"), re.sub(rf"\b{re.escape(known[which])}\b", name, soul))
+    note(f"{message.sender}: {which} is now called {name}")
+    wear(new)
+    return True, name
+
+
 def decide(message, lines):
     """The step before every answer: what, if anything, the message asks the
     bot to DO, beyond talking. Asked of the model as a question of its own,
@@ -677,10 +709,13 @@ def decide(message, lines):
               "remember": r"remember|forget|keep in mind|note|memor"}
     if do in worded and not re.search(rf"\b({worded[do]})", said, re.IGNORECASE) and not talk:
         found, do = {"do": "none"}, "none"
+    renaming = not plain and bool(RENAMES.search(said))
+    if renaming and (do in ("create", "switch") or (do == "change" and not APPEARANCE.search(said))):
+        found, do = {"do": "none"}, "none"   # "change your name" is neither a new personality nor a new manner
     if not plain and do in (None, "none") and not said.rstrip().endswith("?") or (
             not plain and do in (None, "none") and re.search(r"^(can|could|will|would) (yo)?u\b", said, re.IGNORECASE)):
         # Said plainly enough that it needs no judging: a small model lets these pass as talk.
-        if re.search(r"\b(make|create|add|invent|i want|i need|give me)\b.{0,40}\b(persona|personality|character|one "
+        if not renaming and re.search(r"\b(make|create|add|invent|i want|i need|give me)\b.{0,40}\b(persona|personality|character|one "
                      r"where (yo)?u)\b|\b(be|as|become|you are|you're) my .{0,30}(girlfriend|boyfriend|gf|bf|wife|husband)\b",
                      said, re.IGNORECASE):
             found, do = {"do": "create", "name": ""}, "create"
@@ -689,13 +724,20 @@ def decide(message, lines):
               and not re.search(r"\b(pfp|avatar|profile|picture|pic|photo|selfie)\b", said, re.IGNORECASE)):
             found, do = {"do": "change", "text": "", "looks": said}, "change"
     if not plain and do in (None, "none") and re.search(
-            r"\bselfie\b|what (do|does|would) (yo)?u look like|show (me )?(yo)?ur(self| face)|(pic|picture|photo) of (yo)?u(rself)?\b",
+            r"\bselfie\b|what (do|does|would) (yo)?u look like|show (me )?(yo)?ur(self| face)|(pic|picture|photo) of (yo)?u(rself)?\b|"
+            r"\b(let me|lemme|can i|i wanna|i want to|let's) see (yo)?u\b|\bshow me (what )?(yo)?u\b(?! how| the| a | that| what| can| know| did| are)|"
+            r"\bsee what (yo)?u look like|\bhow do (yo)?u look\b",
             said, re.IGNORECASE):
         found, do = {"do": "look"}, "look"
     if not plain and re.search(r"\b(which|what|list|how many|show)\b.{0,40}\b(personalit|persona|character)", said,
                                re.IGNORECASE) and not re.search(r"\b(make|create|new|delete|remove|switch)\b", said, re.IGNORECASE):
         return {"do": "list"}   # asked which it has: answered from the list, whatever the model made of it
-    allowed = ("picture",) if plain else ("picture", "look", "pfp", "remember", "list", "switch", "create", "change", "delete")
+    if renaming:
+        if do in (None, "none"):
+            found, do = {"do": "rename"}, "rename"
+        else:
+            found["rename"] = True
+    allowed = ("picture",) if plain else ("picture", "look", "pfp", "remember", "list", "switch", "create", "change", "delete", "rename")
     if do not in allowed:
         return {"do": "none"}
     if do == "switch":
@@ -792,11 +834,50 @@ def looks_of(which):
     return looks
 
 
+NOT_FOR_A_PROFILE = re.compile(
+    r"\b(nsfw|nude|nudes|naked|topless|porn\w*|hentai|sex|sexual|sexy|erotic\w*|explicit|genital\w*|nipple\w*|penis|"
+    r"vagina|breasts?|boobs?|lingerie|fetish|bdsm|cum|orgasm\w*|bikini|skimpy|revealing|voluptuous|cleavage|curves?|"
+    r"curvy|busty|horny|slutty|seductive|provocative|sultry|lewd|bare|barely|naked|undress\w*|thong|panties|bra)\b",
+    re.IGNORECASE)
+
+
+def face_of(looks):
+    """Looks, as far as a profile picture shows them: the face, the hair,
+    the eyes, a plain top. Everyone sees a profile picture, and the picture
+    bot makes no adult ones when asked for a file."""
+    made = ask_json("Here is what a character looks like. For a head-and-shoulders profile portrait, say only their "
+                    "age, face, hair, eyes and expression, in one sentence about them from outside. Leave out the "
+                    'body and what they wear. Answer with one JSON object and nothing else: {"face": "<the sentence>"}.',
+                    looks, tokens=120, temperature=0.2)
+    face = outside(made.get("face")) or looks
+    face = ", ".join(part.strip() for part in re.split(r"[,.;]", face) if part.strip() and not NOT_FOR_A_PROFILE.search(part))
+    return (face or "a friendly adult") + ", head and shoulders, wearing a plain dark top"
+
+
+def scene_of(looks, message):
+    """A picture of the personality as it was asked to be seen: always the
+    same person, each time a picture of its own."""
+    asked = re.sub(r"@\w+[,:]?\s*", "", message.body).strip()
+    made = ask_json("A character was asked for a picture of themselves. Write the description an image model draws it "
+                    "from. Keep the person exactly as they look: their age, hair, eyes, skin and build, word for word "
+                    "where you can. Then set the rest to what was asked: what they wear, the pose, the place, the "
+                    "light, the mood, as plainly and explicitly as it was asked. If the request says nothing about "
+                    "those, choose a pose, an outfit and a place that fit the character, and a different one each "
+                    "time. Plain phrases with commas between, the person first, fifty words at most, about them from "
+                    'outside, never "I" or "you". Answer with one JSON object and nothing else: '
+                    '{"prompt": "<the description>"}.',
+                    f"What they look like: {looks}\nTheir character: "
+                    f"{' '.join(read_file(persona_file(worn(), 'soul.md')).split())[:300]}\n"
+                    f"The request: {asked}\nA number to vary by: {int(time.time()) % 1000}", tokens=200, temperature=0.9)
+    prompt = re.sub(r"\s--+\w*", " ", outside(made.get("prompt"))).strip()
+    return prompt or looks + ", looking at the camera, photograph, natural light"
+
+
 def first_picture(which, for_whom):
     """A new personality gets a face: its profile picture, from its looks."""
     looks = looks_of(which)
     if looks and which in personas():
-        problem = paint_itself(looks, for_whom, which)
+        problem = paint_itself(face_of(looks), for_whom, which)
         if problem:
             note(f"no picture for {which}: {problem}")
 
@@ -853,8 +934,8 @@ def grant(asked, message):
         looks = looks_of(worn())
         if not looks:
             return ""
-        return hand_to_painter(message, {"prompt": looks + ", looking at the camera, photograph, natural light",
-                                         "size": "tall"}, "a picture of yourself, of what you look like")
+        return hand_to_painter(message, {"prompt": scene_of(looks, message), "size": "tall"},
+                               "a picture of yourself, of what you look like")
     if do == "remember":
         if not text:
             return ""
@@ -870,10 +951,13 @@ def grant(asked, message):
         if not may_reshape(message.sender_id):
             return ("They asked you to change your profile picture, which was not done: only the owner, or someone "
                     "whose role has Manage bots, can change that. Tell them so.")
-        text = text or looks_of(worn())
+        text = text or face_of(looks_of(worn()))
         if not text:
             return ""
         problem = paint_itself(text, message.sender_id)
+        if problem and "adult" in problem:   # described in a way no profile picture is made: its face instead
+            text = face_of(looks_of(worn()))
+            problem = paint_itself(text, message.sender_id)
         if problem:
             return f"They asked you for a new profile picture. It was not made: {problem}. Tell them so."
         return (f"At their request you have just made yourself a new profile picture and put it on: \"{text}\". "
@@ -1038,6 +1122,17 @@ def answer(message, optional=False):
                                                             said={"action": "reply", "text": text}))
             note(f"{message.sender}: listed its personalities")
             return
+        if asked.get("do") == "rename" or asked.get("rename"):
+            # Its new name is said as it is: asked to pass it on, a small model says another.
+            renamed, outcome = rename(message)
+            text = f"Call me **{personas().get(worn(), '')}** from now on." if renamed else outcome
+            sent = bot.reply(message, text)
+            remember(message.room_id, message.thread, entry((sent or {}).get("event_id", ""), args.username, text, mine=True,
+                                                            said={"action": "reply", "text": text}))
+            if asked.get("do") == "rename":
+                thinking.set()
+                return
+            asked = {k: v for k, v in asked.items() if k != "rename"}
         done = grant(asked, message)
         if done is None:   # seen to, and nothing to say about it
             thinking.set()

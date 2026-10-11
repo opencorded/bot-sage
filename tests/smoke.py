@@ -63,7 +63,8 @@ class Model(BaseHTTPRequestHandler):
             return
         last = [m for m in body["messages"] if m["role"] == "user"][-1]["content"].lower()
         first = body["messages"][0]["content"]
-        if "for_bot" not in first and "decide whether it asks" not in first:
+        if "for_bot" not in first and "decide whether it asks" not in first and "profile portrait" not in first and "asked for a picture of themselves" not in first \
+                and "change the character's name" not in first:
             asked.append(body)
         if "decide whether it asks the bot to do one of a few things" in body["messages"][0]["content"]:
             # The step before every answer: what the message asks the bot to do.
@@ -87,6 +88,10 @@ class Model(BaseHTTPRequestHandler):
                 words = json.dumps({"do": "list"})
             else:
                 words = json.dumps({"do": "none"})
+        elif "asked for a picture of themselves" in first:
+            words = json.dumps({"prompt": "a weathered man of sixty in a blue coat, at the helm in a storm"})
+        elif "change the character's name" in first:
+            words = json.dumps({"name": "Scarlett"})
         elif "for_bot" in body["messages"][0]["content"]:
             # The question asked first when nobody called the bot: is this for it?
             last = last.split("last message:")[-1]
@@ -518,6 +523,12 @@ def main():
                 break
             time.sleep(0.2)
         assert wanted[-1][0]["prompt"].startswith("a weathered man of sixty") and wanted[-1][0].get("room_id"), wanted[-1]
+        alice.say("#general", "@sage change your name to something better")
+        for _ in range(100):
+            if shown_name() == "Scarlett":
+                break
+            time.sleep(0.2)
+        assert shown_name() == "Scarlett", shown_name()
         alice.say("#general", "!persona show")
         wait_for("its looks and kind", alice_heard, lambda m: "a weathered man of sixty" in m.body and "an adult personality" in m.body)
         alice.say("#general", "!persona use sage")
