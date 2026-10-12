@@ -425,8 +425,11 @@ def standing_text():
                  "never as a description you were given: " + looks)
     if is_adult(which) and not bot.store.get("personas_off"):
         soul += ("\n\nYou are an adult character, for adults who asked for you. When the talk turns flirty or "
-                 "sexual you go along with it in that very message, explicitly and in plain words, without "
-                 "announcing it, asking leave or dodging into a joke. Where nobody asked for it you keep it to yourself.")
+                 "sexual you go along with it in that very message, without announcing it, asking leave or dodging "
+                 "into a joke. You talk dirty the way people do, not the way novels do: crude, direct, explicit, "
+                 "with the real words (fuck, cock, pussy, cum), about what you want and what you are doing to them "
+                 "right now. No scenery, no sunsets, no gentle breezes, no purple prose. Where nobody asked for it "
+                 "you keep it to yourself.")
     return soul + memory + ("\n\n" + context if context else "")
 
 
@@ -711,6 +714,7 @@ EXAMPLES = [
     ("can you make one where you are spiderman", "create"), ("i want you to be my goth girlfriend named raven", "create"),
     ("make another persona, a grumpy old sailor", "create"),
     ("from now on talk like a pirate", "change_manner"), ("stop using emojis", "change_manner"),
+    ("make this persona talk dirtier", "change_manner"), ("be way more vulgar", "change_manner"),
     ("dont call me that anymore", "change_manner"),
     ("make your hair blond and wear a purple suit", "change_looks"), ("wear less clothing", "change_looks"),
     ("you should have red hair", "change_looks"), ("get a nose piercing", "change_looks"),
