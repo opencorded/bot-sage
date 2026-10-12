@@ -477,19 +477,19 @@ def main():
         files = []
         alice.on_file(files.append)
         for _ in range(150):
-            if wanted and len(asked) > requests:
+            if wanted and files:
                 break
             time.sleep(0.2)
-        time.sleep(1)
+        time.sleep(2)
         assert files and files[-1].sender == "sage" and files[-1].reply_to == asking["event_id"], "it did not post the picture itself"
-        assert "you have just sent it" in asked[-1]["messages"][0]["content"], "it was not told that it had sent a picture"
+        assert len(asked) == requests, "it said something on top of the picture it sent"
         assert not os.listdir(os.path.join(tmp, "sage", "received")), "the picture was kept on disk after sending"
         assert len(wanted) == 1 and wanted[0][1:] == ("alice", "sage"), wanted
         assert wanted[0][0] == {"prompt": "a heron at dawn, soft light", "size": "wide", "room_id": alice.room_id("#general"),
                                 "event_id": asking["event_id"], "return_file": True}, wanted
         alice.say("#general", "@sage what do herons eat? a picture book says fish")
         for _ in range(100):
-            if len(asked) > requests + 1:
+            if len(asked) > requests:
                 break
             time.sleep(0.2)
         assert len(wanted) == 1, "talk about pictures was taken for wanting one"

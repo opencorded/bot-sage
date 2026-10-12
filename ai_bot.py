@@ -963,10 +963,7 @@ def hand_to_painter(message, wanted, what):
         if os.path.exists(got["file"]):
             os.remove(got["file"])   # nothing of a picture is kept here
     note(f"{message.sender}: sent a picture made by {painter()}")
-    return (f"They asked you for {what}, and you have just sent it: it is in the chat, above, as your own picture, "
-            "and it shows what they asked for. Add one short line to go with it, twelve words at most, in your own "
-            "voice, as someone does who has just sent a photo. Do not describe what is in the picture, and do not "
-            "type any command.")
+    return None   # the picture is the answer: nothing is said on top of it
 
 
 def grant(asked, message):
