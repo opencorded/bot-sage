@@ -63,31 +63,31 @@ class Model(BaseHTTPRequestHandler):
             return
         last = [m for m in body["messages"] if m["role"] == "user"][-1]["content"].lower()
         first = body["messages"][0]["content"]
-        if "for_bot" not in first and "decide whether it asks" not in first and "profile portrait" not in first and "asked for a picture of themselves" not in first \
+        if "for_bot" not in first and "You sort one chat message" not in first and "Someone asked a chat bot for a picture" not in first \
+                and "told a chat bot to remember" not in first and "wants a chat bot to become a character" not in first \
+                and "profile portrait" not in first and "asked for a picture of themselves" not in first \
                 and "change the character's name" not in first:
             asked.append(body)
-        if "decide whether it asks the bot to do one of a few things" in body["messages"][0]["content"]:
-            # The step before every answer: what the message asks the bot to do.
-            last = last.split("last message:")[-1]
-            if "draw me" in last:
-                words = json.dumps({"do": "picture", "prompt": "!imagine a heron at dawn, soft light --hot", "size": "wide"})
-            elif "what do you look like" in last:
-                words = json.dumps({"do": "look"})
-            elif "remember that" in last:
-                words = json.dumps({"do": "remember", "text": "alice takes her tea without milk"})
-            elif "new personality" in last:
-                words = json.dumps({"do": "create", "name": "Ruby" if "lewd" in last else "Captain", "text": "You are Captain, an old sailor. You talk like one.",
-                                    "looks": "a weathered man of sixty in a blue coat", "adult": "lewd" in last})
-            elif "switch to" in last:
-                words = json.dumps({"do": "switch", "name": "captain"})
-            elif "from now on" in last:
-                words = json.dumps({"do": "change", "text": "You end every answer with arr."})
-            elif "profile picture" in last:
-                words = json.dumps({"do": "pfp", "text": "an owl wearing a sailor's cap"})
-            elif "which personalities" in last:
-                words = json.dumps({"do": "list"})
-            else:
-                words = json.dumps({"do": "none"})
+        if "You sort one chat message" in first:
+            # The step before every answer: what kind of thing the message asks for.
+            last = last.split("the message:")[-1]
+            kind = "talk"
+            for words_, kind_ in (("draw me", "picture"), ("what do you look like", "selfie"), ("remember that", "remember"),
+                                  ("new personality", "create"), ("switch to", "switch"), ("from now on", "change_manner"),
+                                  ("profile picture", "profile_picture"), ("which personalities", "list")):
+                if words_ in last:
+                    kind = kind_
+                    break
+            words = json.dumps({"kind": kind})
+        elif "Someone asked a chat bot for a picture" in first:
+            words = json.dumps({"prompt": "!imagine a heron at dawn, soft light --hot", "size": "wide"})
+        elif "told a chat bot to remember" in first:
+            words = json.dumps({"fact": "alice takes her tea without milk"})
+        elif "wants a chat bot to become a character" in first:
+            lewd = "lewd" in last
+            words = json.dumps({"name": "Ruby" if lewd else ("Owl" if "owl" in last else "Captain"),
+                                "text": "You are Captain, an old sailor. You talk like one.",
+                                "looks": "a weathered man of sixty in a blue coat", "adult": lewd})
         elif "asked for a picture of themselves" in first:
             words = json.dumps({"prompt": "a weathered man of sixty in a blue coat, at the helm in a storm"})
         elif "change the character's name" in first:
@@ -337,7 +337,7 @@ def main():
         alice.say("#general", "@sage here is a new personality for you: a sailor called Captain")
         time.sleep(3)
         assert "Made: Captain, and that is who I am now" in system() and "You are Captain, an old sailor" in system(), \
-            "a new one is put on at once and confirms itself"
+            ("a new one is put on at once and confirms itself", system()[-600:])
         alice.say("#general", "@sage which personalities do you have")
         wait_for("its list, said as it is", alice_heard, lambda m: "- **Captain** (who I am now)" in m.body and "- **sage**" in m.body)
         for _ in range(50):
@@ -355,11 +355,11 @@ def main():
         assert "Noted in my character" in system()
         alice.say("#general", "@sage and again")
         time.sleep(3)
-        assert "You end every answer with arr." in system()
+        assert 'do it: "from now on end every answer with arr"' in system()
         if shutil.which("ffmpeg"):
             alice.say("#general", "@sage make yourself a new profile picture, an owl in a sailor's cap")
             time.sleep(5)
-            assert painted and "an owl wearing a sailor's cap" in painted[-1]["prompt"], "it asks the picture program itself"
+            assert painted and "an owl in a sailor's cap" in painted[-1]["prompt"], "it asks the picture program itself"
             assert os.path.exists(os.path.join(tmp, "sage", "personas", "captain", "picture.jpg")), "kept with the personality"
             assert "made yourself a new profile picture and put it on" in system()
         alice.say("#general", "!persona")
